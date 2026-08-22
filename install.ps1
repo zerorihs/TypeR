@@ -4,7 +4,6 @@
 $OutputEncoding = New-Object System.Text.UTF8Encoding
 
 # --- 1. Definition robuste du dossier du script ---
-# $PSScriptRoot est une variable native fiable, contrairement e %~dp0
 $ScriptDir = $PSScriptRoot
 Set-Location -Path $ScriptDir
 
@@ -12,55 +11,53 @@ Set-Location -Path $ScriptDir
 $ManifestPath = Join-Path $ScriptDir "CSXS\manifest.xml"
 if (-not (Test-Path $ManifestPath)) {
     Write-Host "[ERREUR] Fichier introuvable : $ManifestPath" -ForegroundColor Red
-    Write-Host "Placez ce script e côte des dossiers 'CSXS', 'app', 'icons', 'locale', 'themes'."
+    Write-Host "Placez ce script a cote des dossiers 'CSXS', 'app', 'icons', 'locale', 'themes'."
     Read-Host "Appuyez sur Entree pour quitter..."
     exit
 }
 
-# --- 3. Extraction de la version (plus precis que findstr) ---
+# --- 3. Extraction de la version ---
 $Content = Get-Content $ManifestPath -Raw
-if ($Content -match 'Extension Id="typer".*?Version="([^"]+)"') {
+if ($Content -match 'Extension Id="typer-smartfit".*?Version="([^"]+)"' -or $Content -match 'Version="([^"]+)"') {
     $ExtVersion = $matches[1]
 } else {
-    $ExtVersion = "Inconnue"
+    $ExtVersion = "2.5.0"
 }
 
 # --- 4. Langues et Messages ---
-# Detection de la langue de l'interface utilisateur (ex: fr-FR)
 $Lang = $Host.CurrentCulture.TwoLetterISOLanguageName
 
-# Valeurs par defaut (Anglais)
-$msg_install  = "Photoshop extension TypeR v$ExtVersion will be installed."
+$msg_install  = "Photoshop extension TypeR SmartFit v$ExtVersion will be installed."
 $msg_close    = "Close Photoshop (if it is open)."
 $msg_complete = "Installation completed."
-$msg_open     = "Open Photoshop and in the upper menu click the following: [Window] > [Extensions] > [TypeR]"
+$msg_open     = "Open Photoshop and in the upper menu click the following: [Window] > [Extensions] > [TypeR SmartFit]"
 $msg_pause    = "Press Enter to continue..."
 $msg_credits  = "Many thanks to Swirt for TyperTools and SeanR & Sakushi for this fork."
 $msg_discord  = "ScanR's Discord if you need help: https://discord.com/invite/Pdmfmqk"
 
 if ($Lang -eq "fr") {
-    $msg_install  = "L'extension Photoshop TypeR v$ExtVersion sera installee."
+    $msg_install  = "L'extension Photoshop TypeR SmartFit v$ExtVersion sera installee."
     $msg_close    = "Fermez Photoshop (s'il est ouvert)."
     $msg_complete = "Installation terminee."
-    $msg_open     = "Ouvrez Photoshop et dans le menu superieur cliquez sur : [Fenetre] > [Extensions] > [TypeR]"
+    $msg_open     = "Ouvrez Photoshop et dans le menu superieur cliquez sur : [Fenetre] > [Extensions] > [TypeR SmartFit]"
     $msg_pause    = "Appuyez sur Entree pour continuer..."
-    $msg_credits  = "Merci beaucoup et Swirt pour TyperTools et SeanR & Sakushi pour ce fork."
+    $msg_credits  = "Merci beaucoup a Swirt pour TyperTools et SeanR & Sakushi pour ce fork."
     $msg_discord  = "Discord de ScanR si besoin d'aide : https://discord.com/invite/Pdmfmqk"
 }
 elseif ($Lang -eq "es") {
-    $msg_install  = "La extensión de Photoshop TypeR v$ExtVersion se instalará."
+    $msg_install  = "La extensión de Photoshop TypeR SmartFit v$ExtVersion se instalará."
     $msg_close    = "Cierra Photoshop (si está abierto)."
     $msg_complete = "Instalación completada."
-    $msg_open     = "Abre Photoshop y en el menú superior haz clic en lo siguiente: [Ventana] > [Extensiones] > [TypeR]"
+    $msg_open     = "Abre Photoshop y en el menú superior haz clic en lo siguiente: [Ventana] > [Extensiones] > [TypeR SmartFit]"
     $msg_pause    = "Presiona Enter para continuar..."
     $msg_credits  = "Muchas gracias a Swirt por TyperTools y a SeanR & Sakushi por este fork."
     $msg_discord  = "Discord de ScanR si necesitas ayuda: https://discord.com/invite/Pdmfmqk"
 }
 elseif ($Lang -eq "pt") {
-    $msg_install  = "Photoshop extension TypeR v$ExtVersion will be installed."
+    $msg_install  = "Photoshop extension TypeR SmartFit v$ExtVersion will be installed."
     $msg_close    = "Feche o Photoshop (se estiver aberto)."
     $msg_complete = "Instalação concluída."
-    $msg_open     = "Abra o Photoshop e no menu superior clique em: [Janela] > [Extensões] > [TypeR]"
+    $msg_open     = "Abra o Photoshop e no menu superior clique em: [Janela] > [Extensões] > [TypeR SmartFit]"
     $msg_pause    = "Pressione Enter para continuar..."
     $msg_credits  = "Muito obrigado a Swirt pelo TyperTools e a SeanR & Sakushi por este fork."
     $msg_discord  = "Discord do ScanR se precisar de ajuda: https://discord.com/invite/Pdmfmqk"
@@ -68,17 +65,16 @@ elseif ($Lang -eq "pt") {
 
 Clear-Host
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Cyan
-Write-Host "|                          TypeR Installer                         |" -ForegroundColor Cyan
+Write-Host "|                      TypeR SmartFit Installer                    |" -ForegroundColor Cyan
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "? $msg_install"
+Write-Host "- $msg_install"
 Write-Host ""
-Write-Host "? $msg_close" -ForegroundColor Yellow
+Write-Host "- $msg_close" -ForegroundColor Yellow
 Write-Host ""
-Read-Host -Prompt "? $msg_pause"
+Read-Host -Prompt "- $msg_pause"
 
-# --- 5. Mode Debug (CSXS 6 e 12) ---
-# Ne necessite pas les droits admin car c'est dans HKCU (Utilisateur courant)
+# --- 5. Mode Debug (CSXS 6 a 12) ---
 6..12 | ForEach-Object {
     $RegPath = "HKCU:\Software\Adobe\CSXS.$_"
     if (Test-Path $RegPath) {
@@ -88,22 +84,17 @@ Read-Host -Prompt "? $msg_pause"
 
 # --- 6. Gestion des dossiers ---
 $AppData = $env:APPDATA
-$TargetDir = Join-Path $AppData "Adobe\CEP\extensions\typertools"
+$TargetDir = Join-Path $AppData "Adobe\CEP\extensions\typertools-smartfit"
 
-# On cree un dossier TEMP pour contenir la sauvegarde (et non le fichier lui-meme)
-$TempBackupContainer = Join-Path $env:TEMP "typer_backup_container"
+$TempBackupContainer = Join-Path $env:TEMP "typer_smartfit_backup_container"
 
-# Nettoyage prealable du temp au cas où
 if (Test-Path $TempBackupContainer) { Remove-Item $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -Path $TempBackupContainer -ItemType Directory -Force | Out-Null
 
-# SAUVEGARDE : On copie "storage" DANS le dossier conteneur
-# Cela preserve la nature de "storage" (que ce soit un fichier ou un dossier)
 if (Test-Path "$TargetDir\storage") {
     Copy-Item "$TargetDir\storage" -Destination $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-# Nettoyage dossier cible (Reset complet de l'extension)
 if (Test-Path $TargetDir) {
     Remove-Item $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -120,26 +111,20 @@ foreach ($folder in $FoldersToCopy) {
     }
 }
 
-# Cas particulier: themes
 if (Test-Path "$ScriptDir\themes") {
     $ThemeDest = "$TargetDir\app\themes"
     if (-not (Test-Path $ThemeDest)) { New-Item $ThemeDest -ItemType Directory -Force | Out-Null }
     Copy-Item "$ScriptDir\themes\*" -Destination $ThemeDest -Recurse -Force
 }
 
-# Fichier .debug
 if (Test-Path "$ScriptDir\.debug") {
     Copy-Item "$ScriptDir\.debug" -Destination "$TargetDir\.debug" -Force
 }
 
-# RESTAURATION DU STORAGE
-# On verifie si la sauvegarde existe dans le conteneur
 if (Test-Path "$TempBackupContainer\storage") {
-    # On copie l'element "storage" depuis le conteneur vers la racine de l'extension
     Copy-Item "$TempBackupContainer\storage" -Destination "$TargetDir" -Recurse -Force
 }
 
-# Nettoyage final du dossier temp
 if (Test-Path $TempBackupContainer) { Remove-Item $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue }
 
 # --- 8. Fin ---
@@ -148,9 +133,9 @@ Write-Host "+------------------------------------------------------------------+
 Write-Host "|                      Installation Completed                      |" -ForegroundColor Green
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Green
 Write-Host ""
-Write-Host "? $msg_complete"
+Write-Host "- $msg_complete"
 Write-Host ""
-Write-Host "? $msg_open" -ForegroundColor Cyan
+Write-Host "- $msg_open" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "+------------------------------------------------------------------+"
 Write-Host "| Credits:                                                         |"
