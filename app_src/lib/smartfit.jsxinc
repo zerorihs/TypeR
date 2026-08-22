@@ -1,4 +1,4 @@
-/* globals app, charID, jamText, jamEngine, executeAction, executeActionGet, ActionDescriptor, ActionReference, DialogModes, stringIDToTypeID, LayerKind, UnitValue, _ensureStyle, _checkSelection, _DEFAULT_ADJUST_SEQUENCE, _calculateSelectionDimensions, _createAndSetLayerText, _getCurrentTextLayerBounds, _resizeTextBoxToContent, _positionLayerWithinSelection, _changeToPointText, _setTextBoxSize */
+/* globals app, charID, charIDToTypeID, jamText, jamEngine, executeAction, executeActionGet, ActionDescriptor, ActionReference, DialogModes, stringIDToTypeID, LayerKind, UnitValue, _ensureStyle, _checkSelection, _DEFAULT_ADJUST_SEQUENCE, _calculateSelectionDimensions, _createAndSetLayerText, _getCurrentTextLayerBounds, _resizeTextBoxToContent, _positionLayerWithinSelection, _changeToPointText, _setTextBoxSize */
 
 var SmartFitEngine = (function () {
   function forceLayoutUpdate() {
@@ -32,32 +32,29 @@ var SmartFitEngine = (function () {
       }
     } catch (domErr) {}
 
-    // 2. Action Manager Font Size Update (preserving textShape)
+    // 2. Photoshop Action Manager Set TextStyle Size
     try {
-      var textParams = jamText.getLayerText();
-      if (textParams && textParams.layerText && textParams.layerText.textStyleRange) {
-        for (var i = 0; i < textParams.layerText.textStyleRange.length; i++) {
-          if (textParams.layerText.textStyleRange[i].textStyle) {
-            textParams.layerText.textStyleRange[i].textStyle.size = size;
-            textParams.layerText.textStyleRange[i].textStyle.impliedFontSize = size;
-          }
-        }
-        jamText.setLayerText(textParams);
-      }
-    } catch (e) {
-      try {
-        var descriptor = new ActionDescriptor();
-        var reference = new ActionReference();
-        reference.putProperty(charID.Property, charID.TextStyle);
-        reference.putEnumerated(charID.TextLayer, charID.Ordinal, charID.Target);
-        descriptor.putReference(charID.Null, reference);
+      var idset = charIDToTypeID("set ");
+      var idnull = charIDToTypeID("null");
+      var idTxLr = charIDToTypeID("TxLr");
+      var idOrdn = charIDToTypeID("Ordn");
+      var idTrgt = charIDToTypeID("Trgt");
+      var idT = charIDToTypeID("T   ");
+      var idTxtS = charIDToTypeID("TxtS");
+      var idSz = charIDToTypeID("Sz  ");
+      var idPnt = charIDToTypeID("#Pnt");
 
-        var newTextStyle = new ActionDescriptor();
-        newTextStyle.putUnitDouble(charID.Size, charID.Point, size);
-        descriptor.putObject(charID.To, charID.TextStyle, newTextStyle);
-        executeAction(charID.Set, descriptor, DialogModes.NO);
-      } catch (err) {}
-    }
+      var desc1 = new ActionDescriptor();
+      var ref1 = new ActionReference();
+      ref1.putProperty(idTxtS, idTxLr);
+      ref1.putEnumerated(idTxLr, idOrdn, idTrgt);
+      desc1.putReference(idnull, ref1);
+
+      var desc2 = new ActionDescriptor();
+      desc2.putUnitDouble(idSz, idPnt, size);
+      desc1.putObject(idT, idTxtS, desc2);
+      executeAction(idset, desc1, DialogModes.NO);
+    } catch (err) {}
   }
 
   function setLayerTracking(trackingValue) {
@@ -119,14 +116,14 @@ var SmartFitEngine = (function () {
 
     // Step 2: Binary Search to find largest font size fitting inside containerWidth x containerHeight
     var low = minFontSize;
-    var high = Math.max(styleFontSize * 3, 120); // Search up to 3x style font size or 120pt max
+    var high = Math.max(styleFontSize * 3, 120);
     var bestFittingSize = minFontSize;
     var maxIterations = 14;
     var iter = 0;
 
     while (low <= high && iter < maxIterations) {
       iter++;
-      var mid = Math.floor(((low + high) / 2) * 2) / 2; // Precision 0.5pt
+      var mid = Math.floor(((low + high) / 2) * 2) / 2;
       if (mid < minFontSize) break;
 
       setLayerFontSize(mid);
@@ -136,9 +133,9 @@ var SmartFitEngine = (function () {
 
       if (!currentOverflow) {
         bestFittingSize = mid;
-        low = mid + 0.5; // Try larger font size
+        low = mid + 0.5;
       } else {
-        high = mid - 0.5; // Font size too big, try smaller
+        high = mid - 0.5;
       }
     }
 
