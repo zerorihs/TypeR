@@ -330,7 +330,15 @@ function _runSmartFit(targetWidth, targetHeight, selection) {
   var isOverflow = (bounds.height > effectiveTargetHeight || bounds.width > finalTargetWidth);
 
   if (isOverflow) {
-    // Stage 1: Coarse decrement (step by 4)
+    // Snap originalSize to the nearest multiple of 4 below it first
+    currentSize = Math.floor(originalSize / step) * step;
+    if (currentSize < minSize) {
+      currentSize = minSize;
+    }
+    _applySizeAndLeading(currentSize, hasLeading, originalLeading, originalSize);
+    bounds = _getCurrentTextLayerBounds();
+    isOverflow = (bounds.height > effectiveTargetHeight || bounds.width > finalTargetWidth);
+
     while (isOverflow && currentSize > minSize) {
       currentSize -= step;
       if (currentSize < minSize) {
@@ -339,20 +347,6 @@ function _runSmartFit(targetWidth, targetHeight, selection) {
       _applySizeAndLeading(currentSize, hasLeading, originalLeading, originalSize);
       bounds = _getCurrentTextLayerBounds();
       isOverflow = (bounds.height > effectiveTargetHeight || bounds.width > finalTargetWidth);
-    }
-
-    // Stage 2: Fine refinement increment (step by 1)
-    while (!isOverflow && currentSize < originalSize) {
-      currentSize += 1;
-      _applySizeAndLeading(currentSize, hasLeading, originalLeading, originalSize);
-      bounds = _getCurrentTextLayerBounds();
-      isOverflow = (bounds.height > effectiveTargetHeight || bounds.width > finalTargetWidth);
-      if (isOverflow) {
-        // We just overflowed again, revert to the last size that fitted
-        currentSize -= 1;
-        _applySizeAndLeading(currentSize, hasLeading, originalLeading, originalSize);
-        break;
-      }
     }
   }
 
