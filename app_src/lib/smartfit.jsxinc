@@ -67,8 +67,8 @@ var SmartFitEngine = (function () {
     return heightOverflow || widthOverflow;
   }
 
-  // Smart Fit v3: Safe Area Calculation based on Bubble Geometry
-  function calculateSafeArea(width, height, customRatio) {
+  // Smart Fit v3: Safe Area Calculation based on Bubble Geometry and Padding
+  function calculateSafeArea(width, height, customRatio, padding) {
     var ratio;
     if (typeof customRatio === "number" && customRatio > 0 && customRatio <= 1) {
       ratio = customRatio;
@@ -87,6 +87,11 @@ var SmartFitEngine = (function () {
 
     var targetWidth = width * ratio;
     var targetHeight = Math.min(height * Math.sqrt(1 - ratio * ratio) * 0.95, height * ratio);
+
+    if (padding > 0) {
+      targetWidth = Math.max(targetWidth - padding * 2, 50);
+      targetHeight = Math.max(targetHeight - padding * 2, 30);
+    }
 
     if (targetWidth <= 0) targetWidth = width;
     if (targetHeight <= 0) targetHeight = height;
@@ -124,8 +129,8 @@ var SmartFitEngine = (function () {
       return selection.error;
     }
 
-    var rawDimensions = _calculateSelectionDimensions(selection, options.padding || 0);
-    var safeArea = calculateSafeArea(rawDimensions.width, rawDimensions.height, safeAreaRatio);
+    var rawDimensions = _calculateSelectionDimensions(selection, 0);
+    var safeArea = calculateSafeArea(rawDimensions.width, rawDimensions.height, safeAreaRatio, options.padding || 0);
     var containerWidth = safeArea.width;
     var containerHeight = safeArea.height;
 
