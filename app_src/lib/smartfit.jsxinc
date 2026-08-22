@@ -22,7 +22,7 @@ var SmartFitEngine = (function () {
   }
 
   function setLayerFontSize(size) {
-    // 1. DOM Assignment Attempt
+    // 1. DOM Assignment
     try {
       if (app.documents.length && app.activeDocument && app.activeDocument.activeLayer) {
         var layer = app.activeDocument.activeLayer;
@@ -32,7 +32,7 @@ var SmartFitEngine = (function () {
       }
     } catch (domErr) {}
 
-    // 2. Action Manager Font Size Update
+    // 2. Action Manager Font Size Update (preserving textShape)
     try {
       var textParams = jamText.getLayerText();
       if (textParams && textParams.layerText && textParams.layerText.textStyleRange) {
@@ -58,24 +58,6 @@ var SmartFitEngine = (function () {
         executeAction(charID.Set, descriptor, DialogModes.NO);
       } catch (err) {}
     }
-  }
-
-  function forceFinalFontSize(size) {
-    try {
-      if (app.documents.length && app.activeDocument && app.activeDocument.activeLayer) {
-        var layer = app.activeDocument.activeLayer;
-        if (layer.kind === LayerKind.TEXT && layer.textItem) {
-          layer.textItem.size = new UnitValue(size, "pt");
-        }
-      }
-    } catch (e1) {}
-
-    setLayerFontSize(size);
-
-    try {
-      app.refresh();
-    } catch (e2) {}
-    forceLayoutUpdate();
   }
 
   function setLayerTracking(trackingValue) {
@@ -104,7 +86,6 @@ var SmartFitEngine = (function () {
     var safeRatio = (typeof options.safeAreaRatio === "number" && options.safeAreaRatio > 0 && options.safeAreaRatio <= 1) ? options.safeAreaRatio : 0.9;
     var minFontSize = (typeof options.minFontSize === "number") ? options.minFontSize : 6;
 
-    // Phase 1: Measure Unclipped Text Layout & Binary Search
     var style = _ensureStyle(data.style);
     var styleFontSize = 20;
     if (style && style.textProps && style.textProps.layerText &&
@@ -132,41 +113,40 @@ var SmartFitEngine = (function () {
       containerHeight = rawDimensions.height;
     }
 
-    // Insert text into temporary unclipped box (height = 99999)
+    // Step 1: Create text layer in temporary unclipped container (height = 99999pt)
     _createAndSetLayerText(data, containerWidth, 99999);
     forceLayoutUpdate();
 
-    var renderedBounds = getRenderedTextBounds();
-    var overflows = checkOverflow(renderedBounds, containerWidth, containerHeight);
-    var bestFittingSize = styleFontSize;
+    // Step 2: Binary Search to find largest font size fitting inside containerWidth x containerHeight
+    var low = minFontSize;
+    var high = Math.max(styleFontSize * 3, 120); // Search up to 3x style font size or 120pt max
+    var bestFittingSize = minFontSize;
+    var maxIterations = 14;
+    var iter = 0;
 
-    if (overflows) {
-      var low = minFontSize;
-      var high = styleFontSize;
-      bestFittingSize = minFontSize;
-      var maxIterations = 12;
-      var iter = 0;
+    while (low <= high && iter < maxIterations) {
+      iter++;
+      var mid = Math.floor(((low + high) / 2) * 2) / 2; // Precision 0.5pt
+      if (mid < minFontSize) break;
 
-      while (low <= high && iter < maxIterations) {
-        iter++;
-        var mid = Math.floor(((low + high) / 2) * 2) / 2; // Precision 0.5pt
-        if (mid < minFontSize) break;
+      setLayerFontSize(mid);
+      forceLayoutUpdate();
+      var currentBounds = getRenderedTextBounds();
+      var currentOverflow = checkOverflow(currentBounds, containerWidth, containerHeight);
 
-        setLayerFontSize(mid);
-        forceLayoutUpdate();
-        var currentBounds = getRenderedTextBounds();
-        var currentOverflow = checkOverflow(currentBounds, containerWidth, containerHeight);
-
-        if (!currentOverflow) {
-          bestFittingSize = mid;
-          low = mid + 0.5;
-        } else {
-          high = mid - 0.5;
-        }
+      if (!currentOverflow) {
+        bestFittingSize = mid;
+        low = mid + 0.5; // Try larger font size
+      } else {
+        high = mid - 0.5; // Font size too big, try smaller
       }
     }
 
-    // Phase 2: Frame Shape & Centering
+    // Step 3: Set optimal font size
+    setLayerFontSize(bestFittingSize);
+    forceLayoutUpdate();
+
+    // Step 4: Frame Shape & Centering
     if (options.point) {
       _changeToPointText();
     } else {
@@ -189,8 +169,12 @@ var SmartFitEngine = (function () {
       }
     }
 
-    // Phase 3: Absolute Last Command - Force Final Font Size
-    forceFinalFontSize(bestFittingSize);
+    // Final re-apply font size to guarantee DOM & Action Manager consistency
+    setLayerFontSize(bestFittingSize);
+
+    try {
+      app.refresh();
+    } catch (e2) {}
 
     return "";
   }
@@ -199,7 +183,6 @@ var SmartFitEngine = (function () {
     fitTextInSelection: fitTextInSelection,
     forceLayoutUpdate: forceLayoutUpdate,
     setLayerFontSize: setLayerFontSize,
-    forceFinalFontSize: forceFinalFontSize,
     setLayerTracking: setLayerTracking,
     checkOverflow: checkOverflow
   };
