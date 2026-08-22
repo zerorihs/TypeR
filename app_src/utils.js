@@ -45,9 +45,11 @@ const checkUpdate = async (currentVersion) => {
     if (newerReleases.length > 0) {
       newerReleases.sort((a, b) => compareVersions(b.tag_name, a.tag_name));
       
+      // Get the download URL for the latest release ZIP
       const latestRelease = newerReleases[0];
       let downloadUrl = null;
       
+      // Try to find TypeR.zip in assets first
       if (latestRelease.assets && latestRelease.assets.length > 0) {
         const zipAsset = latestRelease.assets.find(a => 
           a.name.toLowerCase().endsWith('.zip') && 
@@ -57,6 +59,7 @@ const checkUpdate = async (currentVersion) => {
           downloadUrl = zipAsset.browser_download_url;
         }
       }
+      // Fallback to zipball_url (source code zip)
       if (!downloadUrl) {
         downloadUrl = latestRelease.zipball_url;
       }
@@ -88,22 +91,30 @@ const getOSType = () => {
 const downloadAndInstallUpdate = async (downloadUrl, onProgress, onComplete, onError) => {
   try {
     const osType = getOSType();
+    
+    // Get user's Downloads folder
     const userHome = osType === 'win' 
       ? csInterface.getSystemPath(window.SystemPath.USER_DATA).split('/AppData/')[0]
       : csInterface.getSystemPath(window.SystemPath.USER_DATA).replace('/Library/Application Support', '');
     
-    const downloadsPath = `${userHome}/Downloads/TypeR_Update`;
+    const downloadsPath = osType === 'win'
+      ? `${userHome}/Downloads/TypeR_Update`
+      : `${userHome}/Downloads/TypeR_Update`;
+    
     const zipPath = `${downloadsPath}/TypeR.zip`;
     
     onProgress && onProgress(locale.updateDownloading || 'Downloading update...');
     
+    // Clean and create download directory
     csInterface.evalScript(`deleteFolder("${downloadsPath.replace(/\\/g, '\\\\').replace(/\//g, '\\\\')}")`, () => {
+      // Use cep.fs to create directory
       const mkdirResult = window.cep.fs.makedir(downloadsPath);
-      if (mkdirResult.err && mkdirResult.err !== 0 && mkdirResult.err !== 17) {
+      if (mkdirResult.err && mkdirResult.err !== 0 && mkdirResult.err !== 17) { // 17 = already exists
         onError && onError('Failed to create download directory');
         return;
       }
       
+      // Download the ZIP file
       fetch(downloadUrl, {
         headers: { Accept: 'application/octet-stream' }
       })
@@ -115,6 +126,8 @@ const downloadAndInstallUpdate = async (downloadUrl, onProgress, onComplete, onE
       })
       .then(arrayBuffer => {
         const uint8Array = new Uint8Array(arrayBuffer);
+        
+        // Convert to base64 for file writing
         let binary = '';
         const len = uint8Array.byteLength;
         for (let i = 0; i < len; i++) {
@@ -124,13 +137,17 @@ const downloadAndInstallUpdate = async (downloadUrl, onProgress, onComplete, onE
         
         onProgress && onProgress(locale.updateExtracting || 'Extracting files...');
         
+        // Write ZIP file using base64 encoding
         const writeResult = window.cep.fs.writeFile(zipPath, base64Data, window.cep.encoding.Base64);
         if (writeResult.err) {
           throw new Error('Failed to write ZIP file');
         }
         
+        // Create the auto-install script
         if (osType === 'win') {
+          // Windows: Create PowerShell install script
           const installScript = `# TypeR Auto-Update Script
+# This script will install the update after Photoshop is closed
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = "Stop"
 
@@ -146,6 +163,7 @@ Write-Host "|                      TypeR Auto-Updater                          |
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Cyan
 Write-Host ""
 
+# Check if Photoshop is running
 $psProcess = Get-Process -Name "Photoshop" -ErrorAction SilentlyContinue
 if ($psProcess) {
     Write-Host "[!] Photoshop is running. Please close it first." -ForegroundColor Yellow
@@ -155,17 +173,23 @@ if ($psProcess) {
 
 Write-Host "[*] Installing update..." -ForegroundColor Cyan
 
+# Cleanup temp backup
 if (Test-Path $TempBackupContainer) { Remove-Item $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -Path $TempBackupContainer -ItemType Directory -Force | Out-Null
 
+# Backup storage
 if (Test-Path "$TargetDir\\storage") {
     Copy-Item "$TargetDir\\storage" -Destination $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# Extract ZIP
 if (Test-Path $extractPath) { Remove-Item $extractPath -Recurse -Force }
 New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
 Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
 
+# Find content folder - check if files are at root or in a subfolder
+# If CSXS folder exists at root, files are directly there
+# Otherwise, look for a subfolder containing CSXS
 if (Test-Path "$extractPath\\CSXS") {
     $sourcePath = $extractPath
 } else {
@@ -177,11 +201,13 @@ if (Test-Path "$extractPath\\CSXS") {
     }
 }
 
+# Clean target directory
 if (Test-Path $TargetDir) {
     Remove-Item $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 New-Item -Path $TargetDir -ItemType Directory -Force | Out-Null
 
+# Copy files
 $FoldersToCopy = @("app", "CSXS", "icons", "locale")
 foreach ($folder in $FoldersToCopy) {
     $src = Join-Path $sourcePath $folder
@@ -191,16 +217,19 @@ foreach ($folder in $FoldersToCopy) {
     }
 }
 
+# Copy themes
 if (Test-Path "$sourcePath\\themes") {
     $ThemeDest = "$TargetDir\\app\\themes"
     if (-not (Test-Path $ThemeDest)) { New-Item $ThemeDest -ItemType Directory -Force | Out-Null }
     Copy-Item "$sourcePath\\themes\\*" -Destination $ThemeDest -Recurse -Force
 }
 
+# Restore storage
 if (Test-Path "$TempBackupContainer\\storage") {
     Copy-Item "$TempBackupContainer\\storage" -Destination "$TargetDir" -Recurse -Force
 }
 
+# Cleanup
 if (Test-Path $TempBackupContainer) { Remove-Item $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue }
 
 Write-Host ""
@@ -213,6 +242,7 @@ Write-Host ""
 Write-Host "This folder will be deleted automatically." -ForegroundColor DarkGray
 Read-Host "Press Enter to exit..."
 
+# Cleanup update folder - delete the entire TypeR_Update folder
 $parentDir = Split-Path $ScriptDir -Parent
 $folderName = Split-Path $ScriptDir -Leaf
 Set-Location $parentDir
@@ -232,12 +262,15 @@ PowerShell -NoProfile -ExecutionPolicy Bypass -File "install_update.ps1"
           
           onProgress && onProgress(locale.updateReady || 'Update ready to install...');
           
+          // Open the folder in Explorer
           csInterface.evalScript(`openFolder("${downloadsPath.replace(/\\/g, '\\\\').replace(/\//g, '\\\\')}")`, () => {
-            onComplete && onComplete(true);
+            onComplete && onComplete(true); // true = needs manual step
           });
           
         } else {
+          // macOS: Create shell install script
           const installScript = `#!/bin/bash
+# TypeR Auto-Update Script
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ZIP_PATH="$SCRIPT_DIR/TypeR.zip"
@@ -250,6 +283,7 @@ echo "|                      TypeR Auto-Updater                          |"
 echo "+------------------------------------------------------------------+"
 echo ""
 
+# Check if Photoshop is running
 if pgrep -x "Adobe Photoshop" > /dev/null; then
     echo "[!] Photoshop is running. Please close it first."
     echo ""
@@ -258,14 +292,17 @@ fi
 
 echo "[*] Installing update..."
 
+# Backup storage
 if [ -e "$DEST_DIR/storage" ]; then
     cp "$DEST_DIR/storage" "$TEMP_STORAGE"
 fi
 
+# Extract ZIP
 rm -rf "$EXTRACT_PATH"
 mkdir -p "$EXTRACT_PATH"
 unzip -o "$ZIP_PATH" -d "$EXTRACT_PATH"
 
+# Find content folder - check if files are at root or in a subfolder
 if [ -d "$EXTRACT_PATH/CSXS" ]; then
     SOURCE_PATH="$EXTRACT_PATH"
 else
@@ -277,20 +314,24 @@ else
     fi
 fi
 
+# Clean and recreate target
 rm -rf "$DEST_DIR"
 mkdir -p "$DEST_DIR"
 
+# Copy files
 for folder in app CSXS icons locale; do
     if [ -d "$SOURCE_PATH/$folder" ]; then
         cp -r "$SOURCE_PATH/$folder" "$DEST_DIR/"
     fi
 done
 
+# Copy themes
 if [ -d "$SOURCE_PATH/themes" ]; then
     mkdir -p "$DEST_DIR/app/themes"
     cp -r "$SOURCE_PATH/themes/"* "$DEST_DIR/app/themes/"
 fi
 
+# Restore storage
 if [ -f "$TEMP_STORAGE" ]; then
     cp "$TEMP_STORAGE" "$DEST_DIR/storage"
 fi
@@ -305,6 +346,7 @@ echo ""
 echo "This folder will be deleted automatically."
 read -p "Press Enter to exit..."
 
+# Cleanup - delete the entire TypeR_Update folder
 cd "$HOME/Downloads"
 rm -rf "$SCRIPT_DIR"
 `;
@@ -312,11 +354,13 @@ rm -rf "$SCRIPT_DIR"
           const shScriptPath = `${downloadsPath}/install_update.command`;
           window.cep.fs.writeFile(shScriptPath, installScript);
           
+          // Make executable
           csInterface.evalScript(`makeExecutable("${shScriptPath}")`, () => {
             onProgress && onProgress(locale.updateReady || 'Update ready to install...');
             
+            // Open the folder in Finder
             csInterface.evalScript(`openFolder("${downloadsPath}")`, () => {
-              onComplete && onComplete(true);
+              onComplete && onComplete(true); // true = needs manual step
             });
           });
         }
@@ -417,6 +461,7 @@ const initLocale = () => {
       locale = Object.assign(locale, data);
     }
   };
+  // Always merge default strings to ensure fallbacks for new keys
   loadLocaleFile(`${path}/locale/messages.properties`);
   const lang = readStorage("language");
   if (lang && lang !== "auto") {
@@ -531,32 +576,57 @@ const parseMarkdownRuns = (input) => {
     }
   };
 
+  const pushOverlayText = (segment, style) => {
+    if (!segment) return;
+    let buffer = "";
+    for (let i = 0; i < segment.length; i++) {
+      const char = segment[i];
+      const next = segment[i + 1];
+      const isEscaped = char === "\\" && (next === "\\" || next === "*" || next === "_");
+      if (isEscaped) {
+        if (buffer) {
+          pushOverlaySegment(buffer, style, false);
+          buffer = "";
+        }
+        // Keep the backslash width for caret alignment but hide it
+        pushOverlaySegment("\\", style, true);
+        // Render the escaped character visibly
+        pushOverlaySegment(next === "\\" ? "\\" : next, style, false);
+        i += 1;
+        continue;
+      }
+      buffer += char;
+    }
+    if (buffer) {
+      pushOverlaySegment(buffer, style, false);
+    }
+  };
+
   const walk = (segment, style) => {
     let cursor = 0;
     while (cursor < segment.length) {
       const match = findNextMarker(segment, cursor);
       if (!match) {
-        const remaining = segment.slice(cursor);
-        pushRun(remaining, style);
-        pushOverlaySegment(remaining, style, false, "none");
+        const tail = segment.slice(cursor);
+        pushRun(tail, style);
+        pushOverlayText(tail, style);
         break;
       }
-
       if (match.index > cursor) {
-        const prefix = segment.slice(cursor, match.index);
-        pushRun(prefix, style);
-        pushOverlaySegment(prefix, style, false, "none");
+        const before = segment.slice(cursor, match.index);
+        pushRun(before, style);
+        pushOverlayText(before, style);
       }
-
       const afterOpen = match.index + match.marker.token.length;
       const closeIndex = findUnescapedToken(segment, match.marker.token, afterOpen);
       if (closeIndex === -1) {
-        const fallbackText = segment.slice(match.index);
-        pushRun(fallbackText, style);
-        pushOverlaySegment(fallbackText, style, false, "none");
-        break;
+        const unmatched = segment.slice(match.index, afterOpen);
+        pushRun(unmatched, style);
+        pushOverlayText(unmatched, style);
+        cursor = afterOpen;
+        continue;
       }
-
+      // Opening marker: keep width for alignment
       pushOverlaySegment(match.marker.token, style, true, "open");
       const inner = segment.slice(afterOpen, closeIndex);
       const nextStyle = {
@@ -564,6 +634,7 @@ const parseMarkdownRuns = (input) => {
         italic: style.italic || match.marker.italic,
       };
       walk(inner, nextStyle);
+      // Closing marker: keep width for alignment
       pushOverlaySegment(match.marker.token, style, true, "close");
       cursor = closeIndex + match.marker.token.length;
     }
@@ -665,6 +736,7 @@ const convertHtmlToMarkdown = (html) => {
 };
 
 const setActiveLayerText = (text, style, direction, callback = () => {}) => {
+  // Support legacy calls where direction is omitted and callback is 3rd parameter
   if (typeof direction === "function") {
     callback = direction;
     direction = undefined;
@@ -680,6 +752,7 @@ const setActiveLayerText = (text, style, direction, callback = () => {}) => {
     style,
     direction,
     richTextRuns: parsed.richTextRuns,
+    enableSmartFitOnPaste: readStorage("enableSmartFitOnPaste") === true,
   });
   csInterface.evalScript("setActiveLayerText(" + data + ")", (error) => {
     if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
@@ -724,19 +797,15 @@ const getSelectionChanged = (callback = () => {}) => {
   });
 };
 
-const createTextLayerInSelection = (text, style, pointText, padding, direction, smartFit, callback = () => {}) => {
+const createTextLayerInSelection = (text, style, pointText, padding, direction, callback = () => {}) => {
+  // Support legacy calls where padding/direction are omitted and callback may be 4th or 5th parameter
   if (typeof padding === "function") {
     callback = padding;
     padding = 0;
     direction = undefined;
-    smartFit = undefined;
   } else if (typeof direction === "function") {
     callback = direction;
     direction = undefined;
-    smartFit = undefined;
-  } else if (typeof smartFit === "function") {
-    callback = smartFit;
-    smartFit = undefined;
   }
   if (!text) {
     nativeAlert(locale.errorNoText, locale.errorTitle, true);
@@ -752,8 +821,8 @@ const createTextLayerInSelection = (text, style, pointText, padding, direction, 
     style,
     padding: padding || 0,
     direction,
-    smartFit,
     richTextRuns: parsed.richTextRuns,
+    enableSmartFitOnPaste: readStorage("enableSmartFitOnPaste") === true,
   });
   csInterface.evalScript("createTextLayerInSelection(" + data + ", " + !!pointText + ")", (error) => {
     if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);
@@ -763,6 +832,7 @@ const createTextLayerInSelection = (text, style, pointText, padding, direction, 
 };
 
 const createTextLayersInStoredSelections = (texts, styles, selections, pointText, padding, direction, callback = () => {}) => {
+  // Support legacy calls where padding/direction are omitted and callback may be 5th or 6th parameter
   if (typeof padding === "function") {
     callback = padding;
     padding = 0;
@@ -792,6 +862,7 @@ const createTextLayersInStoredSelections = (texts, styles, selections, pointText
     selections,
     padding: padding || 0,
     direction,
+    enableSmartFitOnPaste: readStorage("enableSmartFitOnPaste") === true,
   });
   csInterface.evalScript("createTextLayersInStoredSelections(" + data + ", " + !!pointText + ")", (error) => {
     if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);
@@ -940,44 +1011,11 @@ const getDefaultStroke = () => {
   };
 };
 
-const openFile = (filePath, callback = () => {}) => {
-  csInterface.evalScript(`openFile("${filePath.replace(/\\/g, "\\\\")}")`, (result) => {
-    callback(result === "true" || result === true);
-  });
+const openFile = (path, autoClose = false) => {
+  const encodedPath = JSON.stringify(path);
+  csInterface.evalScript(
+    "openFile(" + encodedPath + ", " + (autoClose ? "true" : "false") + ")"
+  );
 };
 
-export {
-  csInterface,
-  locale,
-  openUrl,
-  readStorage,
-  writeToStorage,
-  deleteStorageFile,
-  nativeAlert,
-  nativeConfirm,
-  getUserFonts,
-  getActiveLayerText,
-  setActiveLayerText,
-  getCurrentSelection,
-  getSelectionBoundsHash,
-  startSelectionMonitoring,
-  stopSelectionMonitoring,
-  getSelectionChanged,
-  createTextLayerInSelection,
-  createTextLayersInStoredSelections,
-  alignTextLayerToSelection,
-  changeActiveLayerTextSize,
-  getHotkeyPressed,
-  resizeTextArea,
-  scrollToLine,
-  scrollToStyle,
-  rgbToHex,
-  getStyleObject,
-  getDefaultStyle,
-  getDefaultStroke,
-  openFile,
-  checkUpdate,
-  downloadAndInstallUpdate,
-  convertHtmlToMarkdown,
-  parseMarkdownRuns,
-};
+export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };

@@ -253,6 +253,152 @@ function _convertPixelToPoint(value) {
   return (parseInt(value) / activeDocument.resolution) * 72;
 }
 
+function _convertPointToPixel(value) {
+  return (parseFloat(value) / 72) * activeDocument.resolution;
+}
+
+function _runSmartFit(targetWidth, targetHeight, selection) {
+  if (targetWidth <= 0 || targetHeight <= 0) return;
+
+  var isPoint = _textLayerIsPointText();
+  if (isPoint) {
+    _changeToBoxText();
+  }
+
+  // Calculate optimized width and height for elliptical fit (avoid corner clipping)
+  var finalTargetWidth = targetWidth;
+  var effectiveTargetHeight = targetHeight;
+
+  if (selection && typeof selection.width === "number" && selection.width > 0) {
+    var padding = _hostState.createTextLayerInSelection.padding || 0;
+    // Set width to the optimal ellipse inscribed rectangle width (~72% of bubble width)
+    finalTargetWidth = selection.width * 0.72;
+    if (padding > 0) {
+      finalTargetWidth = Math.max(finalTargetWidth - padding * 2, _MIN_TEXTBOX_WIDTH);
+    }
+    
+    var wRatio = finalTargetWidth / selection.width;
+    if (wRatio < 1) {
+      // Height limit for the inscribed rectangle
+      effectiveTargetHeight = selection.height * Math.sqrt(1 - wRatio * wRatio) * 0.95;
+    } else {
+      effectiveTargetHeight = targetHeight * 0.72;
+    }
+  } else {
+    // Fallback if no selection is passed (fitting to existing box)
+    finalTargetWidth = targetWidth * 0.8;
+    effectiveTargetHeight = targetHeight * 0.72;
+  }
+
+  // Set initial text box width to finalTargetWidth. We set the height to a large value initially so text doesn't overflow during measurement.
+  _setTextBoxSize(finalTargetWidth, effectiveTargetHeight * 2);
+
+  var textParams = jamText.getLayerText();
+  if (!textParams || !textParams.layerText || !textParams.layerText.textStyleRange || !textParams.layerText.textStyleRange[0]) {
+    return;
+  }
+
+  var textStyle = textParams.layerText.textStyleRange[0].textStyle;
+  var originalSize = textStyle.size || 14;
+  var originalLeading = textStyle.leading;
+  var hasLeading = !textStyle.autoLeading && (originalLeading !== undefined);
+
+  var currentSize = originalSize;
+  var currentTracking = textStyle.tracking || 0;
+
+  var maxIterations = 20;
+  var minSize = Math.max(6, originalSize * 0.4); // Don't go below 6pt or 40% of original size
+
+  for (var iter = 0; iter < maxIterations; iter++) {
+    // Measure current bounds of the rendered text pixels
+    var bounds = _getCurrentTextLayerBounds();
+    var textHeight = bounds.height;
+    var textWidth = bounds.width;
+
+    // Check if it fits within the elliptical bounds
+    if (textHeight <= effectiveTargetHeight && textWidth <= finalTargetWidth) {
+      break; // Fits!
+    }
+
+    // Try reducing size
+    if (currentSize > minSize) {
+      currentSize -= 1.0; // Reduce by 1 unit
+      if (currentSize < minSize) currentSize = minSize;
+    } else {
+      // If we are already at minimum size and still don't fit, try tightening tracking
+      if (currentTracking > -50) {
+        currentTracking -= 10;
+      } else {
+        break; // Can't reduce further
+      }
+    }
+
+    // Apply new size, leading, tracking
+    var newStyle = {
+      size: currentSize,
+      tracking: currentTracking
+    };
+    if (hasLeading) {
+      newStyle.autoLeading = false;
+      newStyle.leading = currentSize * (originalLeading / originalSize);
+    } else {
+      newStyle.autoLeading = true;
+    }
+
+    // Update layer text style
+    var updatedParams = jamText.getLayerText();
+    if (updatedParams && updatedParams.layerText && updatedParams.layerText.textStyleRange) {
+      for (var i = 0; i < updatedParams.layerText.textStyleRange.length; i++) {
+        var styleObj = updatedParams.layerText.textStyleRange[i].textStyle;
+        styleObj.size = newStyle.size;
+        styleObj.tracking = newStyle.tracking;
+        if (newStyle.autoLeading) {
+          styleObj.autoLeading = true;
+          if (styleObj.hasOwnProperty("leading")) delete styleObj.leading;
+        } else {
+          styleObj.autoLeading = false;
+          styleObj.leading = newStyle.leading;
+        }
+      }
+      jamText.setLayerText(updatedParams);
+    }
+  }
+
+  // After fitting, adjust the final text box height to fit the content exactly
+  var finalBounds = _getCurrentTextLayerBounds();
+  _setTextBoxSize(finalTargetWidth, finalBounds.height + currentSize + 2);
+}
+
+function _runSmartFitOnActiveLayer(data) {
+  // Try to get active selection bounds first
+  var selection = _getCurrentSelectionBounds();
+  var targetWidth = 0;
+  var targetHeight = 0;
+  var padding = data.padding || _hostState.createTextLayerInSelection.padding || 0;
+
+  if (selection !== undefined) {
+    var dimensions = _calculateSelectionDimensions(selection, padding);
+    targetWidth = dimensions.width;
+    targetHeight = dimensions.height;
+  } else {
+    // No selection, try to use current text layer bounds
+    try {
+      var textParams = jamText.getLayerText();
+      if (textParams && textParams.layerText && textParams.layerText.textShape && textParams.layerText.textShape[0]) {
+        var shape = textParams.layerText.textShape[0];
+        if (shape.textType === "box" && shape.bounds) {
+          targetWidth = _convertPointToPixel(shape.bounds.right - shape.bounds.left);
+          targetHeight = _convertPointToPixel(shape.bounds.bottom - shape.bounds.top);
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (targetWidth > 0 && targetHeight > 0) {
+    _runSmartFit(targetWidth, targetHeight, selection);
+  }
+}
+
 function _createCurrent(target, id) {
   var reference = new ActionReference();
   if (id > 0) reference.putProperty(charID.Property, id);
@@ -993,23 +1139,27 @@ function _setActiveLayerText() {
     if (dataStyle && dataStyle.stroke) {
       _setLayerStroke(dataStyle.stroke);
     }
-    var newBounds = _getCurrentTextLayerBounds();
-    if (isPoint) {
-      _changeToPointText();
+    if (payload.enableSmartFitOnPaste) {
+      _runSmartFitOnActiveLayer(payload);
     } else {
-      var textSize = 12;
-      var styleSize = dataStyle && dataStyle.textProps.layerText.textStyleRange[0].textStyle.size;
-      if (styleSize != null) {
-        textSize = styleSize;
-      } else if (oldTextParams.layerText.textStyleRange && oldTextParams.layerText.textStyleRange[0] && oldTextParams.layerText.textStyleRange[0].textStyle.size != null) {
-        textSize = oldTextParams.layerText.textStyleRange[0].textStyle.size;
+      var newBounds = _getCurrentTextLayerBounds();
+      if (isPoint) {
+        _changeToPointText();
+      } else {
+        var textSize = 12;
+        var styleSize = dataStyle && dataStyle.textProps.layerText.textStyleRange[0].textStyle.size;
+        if (styleSize != null) {
+          textSize = styleSize;
+        } else if (oldTextParams.layerText.textStyleRange && oldTextParams.layerText.textStyleRange[0] && oldTextParams.layerText.textStyleRange[0].textStyle.size != null) {
+          textSize = oldTextParams.layerText.textStyleRange[0].textStyle.size;
+        }
+        newTextParams.layerText.textShape[0].bounds.bottom = _convertPixelToPoint(newBounds.height + textSize + 2);
+        jamText.setLayerText({
+          layerText: {
+            textShape: newTextParams.layerText.textShape,
+          },
+        });
       }
-      newTextParams.layerText.textShape[0].bounds.bottom = _convertPixelToPoint(newBounds.height + textSize + 2);
-      jamText.setLayerText({
-        layerText: {
-          textShape: newTextParams.layerText.textShape,
-        },
-      });
     }
     newBounds = _getCurrentTextLayerBounds();
     if (!oldBounds.bottom) oldBounds = newBounds;
@@ -1028,17 +1178,6 @@ function _createTextLayerInSelection() {
     return;
   }
   
-  var smartFitOpts = state.data && state.data.smartFit;
-  if (smartFitOpts && smartFitOpts.enabled !== false && typeof SmartFitEngine !== "undefined") {
-    state.result = SmartFitEngine.fitTextInSelection(state.data, {
-      point: state.point,
-      padding: state.padding,
-      safeAreaRatio: smartFitOpts.safeAreaRatio,
-      minFontSize: smartFitOpts.minFontSize
-    });
-    return;
-  }
-
   // Get the text size from the style to pre-expand/dilate selection
   var textSize = _hostState.fallbackTextSize || 20;
   var style = _ensureStyle(state.data.style);
@@ -1060,13 +1199,17 @@ function _createTextLayerInSelection() {
   }
   var dimensions = _calculateSelectionDimensions(selection, state.padding);
   _createAndSetLayerText(state.data, dimensions.width, dimensions.height);
-  var bounds = _getCurrentTextLayerBounds();
-  if (state.point) {
-    _changeToPointText();
+  if (state.data.enableSmartFitOnPaste) {
+    _runSmartFit(dimensions.width, dimensions.height, selection);
   } else {
-    _resizeTextBoxToContent(dimensions.width, bounds);
+    var bounds = _getCurrentTextLayerBounds();
+    if (state.point) {
+      _changeToPointText();
+    } else {
+      _resizeTextBoxToContent(dimensions.width, bounds);
+    }
   }
-  bounds = _getCurrentTextLayerBounds();
+  var bounds = _getCurrentTextLayerBounds();
   _positionLayerWithinSelection(selection, bounds);
   state.result = "";
 }
@@ -1482,16 +1625,20 @@ function _createTextLayersInStoredSelections() {
       }
 
       // Créer le layer de texte
-      var data = { text: text, style: style, direction: state.data.direction, richTextRuns: textRuns };
+      var data = { text: text, style: style, direction: state.data.direction, richTextRuns: textRuns, enableSmartFitOnPaste: state.data.enableSmartFitOnPaste };
       _createAndSetLayerText(data, dimensions.width, dimensions.height);
 
-      var bounds = _getCurrentTextLayerBounds();
-      if (state.point) {
-        _changeToPointText();
+      if (state.data.enableSmartFitOnPaste) {
+        _runSmartFit(dimensions.width, dimensions.height, selection);
       } else {
-        _resizeTextBoxToContent(dimensions.width, bounds);
+        var bounds = _getCurrentTextLayerBounds();
+        if (state.point) {
+          _changeToPointText();
+        } else {
+          _resizeTextBoxToContent(dimensions.width, bounds);
+        }
       }
-      bounds = _getCurrentTextLayerBounds();
+      var bounds = _getCurrentTextLayerBounds();
 
       // Positionner le layer à l'emplacement de la sélection stockée
       _positionLayerWithinSelection(selection, bounds);
