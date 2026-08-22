@@ -179,10 +179,10 @@ const prodConfig = {
                 'host.jsx': code => {
                     const res = UglifyJS.minify(code, {
                         compress: false,
-                        output: {beautify: false, indent_level: 0, quote_keys: true}
+                        output: {beautify: true, indent_level: 1, quote_keys: true}
                     });
-                    // Preserve function structure: only collapse excessive whitespace
-                    return res.code.replace(/[ \t]+/g, ' ');
+                    // Keep beautified output, minimal cleanup
+                    return res.code.replace(/^[ \t]+$/gm, '');
                 }
             }
         })
