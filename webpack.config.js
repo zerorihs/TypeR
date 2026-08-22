@@ -177,8 +177,12 @@ const prodConfig = {
             },
             transform: {
                 'host.jsx': code => {
-                    const res = UglifyJS.minify(code, {compress: false, output: {beautify: true, indent_level: 0, quote_keys: true}});
-                    return res.code.replace(/([{};:,])\s*\n+\s*/gi, '$1').replace(/\s*\n+\s*([})\];:,])/gi, '$1');
+                    const res = UglifyJS.minify(code, {
+                        compress: false,
+                        output: {beautify: false, indent_level: 0, quote_keys: true}
+                    });
+                    // Preserve function structure: only collapse excessive whitespace
+                    return res.code.replace(/[ \t]+/g, ' ');
                 }
             }
         })
