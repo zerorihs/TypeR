@@ -3,18 +3,8 @@
 var SmartFitEngine = (function () {
   function forceLayoutUpdate() {
     try {
-      if (app.documents.length && app.activeDocument && app.activeDocument.activeLayer && app.activeDocument.activeLayer.kind === LayerKind.TEXT) {
-        var textItem = app.activeDocument.activeLayer.textItem;
-        textItem.contents = textItem.contents;
-      }
-    } catch (e1) {}
-    try {
-      var boundsTypeId = stringIDToTypeID("bounds");
-      var ref = new ActionReference();
-      ref.putProperty(charID.Property, boundsTypeId);
-      ref.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
-      executeActionGet(ref);
-    } catch (e2) {}
+      app.refresh();
+    } catch (e) {}
   }
 
   function getRenderedTextBounds() {
@@ -22,7 +12,6 @@ var SmartFitEngine = (function () {
   }
 
   function setLayerFontSize(size) {
-    // 1. DOM Assignment
     try {
       if (app.documents.length && app.activeDocument && app.activeDocument.activeLayer) {
         var layer = app.activeDocument.activeLayer;
@@ -30,9 +19,8 @@ var SmartFitEngine = (function () {
           layer.textItem.size = new UnitValue(size, "pt");
         }
       }
-    } catch (domErr) {}
+    } catch (e1) {}
 
-    // 2. Photoshop Action Manager Set TextStyle Size
     try {
       var idset = charIDToTypeID("set ");
       var idnull = charIDToTypeID("null");
@@ -78,11 +66,43 @@ var SmartFitEngine = (function () {
     return heightOverflow || widthOverflow;
   }
 
+  // Smart Fit v3: Safe Area Calculation based on Bubble Geometry
+  function calculateSafeArea(width, height, customRatio) {
+    var ratio;
+    if (typeof customRatio === "number" && customRatio > 0 && customRatio <= 1) {
+      ratio = customRatio;
+    } else {
+      var R = width / (height || 1);
+      if (R < 0.6) {
+        ratio = 0.65;
+      } else if (R < 0.9) {
+        ratio = 0.70;
+      } else if (R <= 1.2) {
+        ratio = 0.75;
+      } else {
+        ratio = 0.80;
+      }
+    }
+
+    var targetWidth = width * ratio;
+    var targetHeight = Math.min(height * Math.sqrt(1 - ratio * ratio) * 0.95, height * ratio);
+
+    if (targetWidth <= 0) targetWidth = width;
+    if (targetHeight <= 0) targetHeight = height;
+
+    return {
+      width: targetWidth,
+      height: targetHeight,
+      ratio: ratio
+    };
+  }
+
   function fitTextInSelection(data, options) {
     options = options || {};
-    var safeRatio = (typeof options.safeAreaRatio === "number" && options.safeAreaRatio > 0 && options.safeAreaRatio <= 1) ? options.safeAreaRatio : 0.9;
+    var safeAreaRatio = options.safeAreaRatio;
     var minFontSize = (typeof options.minFontSize === "number") ? options.minFontSize : 6;
 
+    // Step 1: Ensure Style & Get Original Font Size
     var style = _ensureStyle(data.style);
     var styleFontSize = 20;
     if (style && style.textProps && style.textProps.layerText &&
@@ -93,6 +113,7 @@ var SmartFitEngine = (function () {
       styleFontSize = style.textProps.layerText.textStyleRange[0].textStyle.size;
     }
 
+    // Step 2: Selection Bounds & Safe Text Area
     var selection = _checkSelection({
       adjustSequence: _DEFAULT_ADJUST_SEQUENCE,
       preExpandAmount: styleFontSize
@@ -102,48 +123,48 @@ var SmartFitEngine = (function () {
     }
 
     var rawDimensions = _calculateSelectionDimensions(selection, options.padding || 0);
-    var containerWidth = rawDimensions.width * safeRatio;
-    var containerHeight = rawDimensions.height * safeRatio;
+    var safeArea = calculateSafeArea(rawDimensions.width, rawDimensions.height, safeAreaRatio);
+    var containerWidth = safeArea.width;
+    var containerHeight = safeArea.height;
 
-    if (containerWidth <= 0 || containerHeight <= 0) {
-      containerWidth = rawDimensions.width;
-      containerHeight = rawDimensions.height;
-    }
-
-    // Step 1: Create text layer in temporary unclipped container (height = 99999pt)
+    // Step 3: Insert Text with Original Font Size into Temporary Container (height = 99999)
     _createAndSetLayerText(data, containerWidth, 99999);
     forceLayoutUpdate();
 
-    // Step 2: Binary Search to find largest font size fitting inside containerWidth x containerHeight
-    var low = minFontSize;
-    var high = Math.max(styleFontSize * 3, 120);
-    var bestFittingSize = minFontSize;
-    var maxIterations = 14;
-    var iter = 0;
+    var initialBounds = getRenderedTextBounds();
+    var isOverflow = checkOverflow(initialBounds, containerWidth, containerHeight);
+    var bestFittingSize = styleFontSize;
 
-    while (low <= high && iter < maxIterations) {
-      iter++;
-      var mid = Math.floor(((low + high) / 2) * 2) / 2;
-      if (mid < minFontSize) break;
+    // Step 4: Binary Search for Maximum Fitting Font Size (5 iterations max)
+    if (isOverflow) {
+      var low = minFontSize;
+      var high = styleFontSize;
+      bestFittingSize = minFontSize;
+      var maxIterations = 5;
 
-      setLayerFontSize(mid);
-      forceLayoutUpdate();
-      var currentBounds = getRenderedTextBounds();
-      var currentOverflow = checkOverflow(currentBounds, containerWidth, containerHeight);
+      for (var iter = 0; iter < maxIterations; iter++) {
+        var mid = Math.floor(((low + high) / 2) * 10) / 10;
+        if (mid < minFontSize) break;
 
-      if (!currentOverflow) {
-        bestFittingSize = mid;
-        low = mid + 0.5;
-      } else {
-        high = mid - 0.5;
+        setLayerFontSize(mid);
+        forceLayoutUpdate();
+        var currentBounds = getRenderedTextBounds();
+        var currentOverflow = checkOverflow(currentBounds, containerWidth, containerHeight);
+
+        if (!currentOverflow) {
+          bestFittingSize = mid;
+          low = mid + 0.1; // Fits! Try larger font size
+        } else {
+          high = mid - 0.1; // Overflows! Try smaller font size
+        }
       }
     }
 
-    // Step 3: Set optimal font size
+    // Step 5: Set Optimal Font Size
     setLayerFontSize(bestFittingSize);
     forceLayoutUpdate();
 
-    // Step 4: Frame Shape & Centering
+    // Step 6: Fit Box Height & Center Layer
     if (options.point) {
       _changeToPointText();
     } else {
@@ -153,9 +174,9 @@ var SmartFitEngine = (function () {
     var finalLayerBounds = getRenderedTextBounds();
     _positionLayerWithinSelection(selection, finalLayerBounds);
 
-    // Final tracking fallback if still overflows at min font size
+    // Step 7: Auto Tracking Fallback (-25, then -50) if still overflows at min size
     if (checkOverflow(finalLayerBounds, containerWidth, containerHeight)) {
-      var fallbackTrackings = [-10, -20, -35, -50];
+      var fallbackTrackings = [-25, -50];
       for (var t = 0; t < fallbackTrackings.length; t++) {
         setLayerTracking(fallbackTrackings[t]);
         forceLayoutUpdate();
@@ -166,18 +187,16 @@ var SmartFitEngine = (function () {
       }
     }
 
-    // Final re-apply font size to guarantee DOM & Action Manager consistency
+    // Step 8: Re-apply final font size
     setLayerFontSize(bestFittingSize);
-
-    try {
-      app.refresh();
-    } catch (e2) {}
+    forceLayoutUpdate();
 
     return "";
   }
 
   return {
     fitTextInSelection: fitTextInSelection,
+    calculateSafeArea: calculateSafeArea,
     forceLayoutUpdate: forceLayoutUpdate,
     setLayerFontSize: setLayerFontSize,
     setLayerTracking: setLayerTracking,
