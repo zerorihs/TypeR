@@ -359,6 +359,12 @@ function _runSmartFit(targetWidth, targetHeight, selection) {
   // After fitting, adjust the final text box height to fit the content exactly
   var finalBounds = _getCurrentTextLayerBounds();
   _setTextBoxSize(finalTargetWidth, finalBounds.height + currentSize + 2);
+
+  // Auto Re-align after resize if selection is available
+  if (selection) {
+    var alignedBounds = _getCurrentTextLayerBounds();
+    _positionLayerWithinSelection(selection, alignedBounds);
+  }
 }
 
 function _applySizeAndLeading(size, hasLeading, originalLeading, originalSize) {
