@@ -3,7 +3,11 @@
 var SmartFitEngine = (function () {
   function forceLayoutUpdate() {
     try {
-      app.refresh();
+      var boundsTypeId = stringIDToTypeID("bounds");
+      var ref = new ActionReference();
+      ref.putProperty(charID.Property, boundsTypeId);
+      ref.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
+      executeActionGet(ref);
     } catch (e) {}
   }
 
@@ -188,9 +192,11 @@ var SmartFitEngine = (function () {
       }
     }
 
-    // Step 8: Re-apply final integer font size
+    // Step 8: Re-apply final integer font size and force single draw
     setLayerFontSize(bestFittingSize);
-    forceLayoutUpdate();
+    try {
+      app.refresh();
+    } catch (e2) {}
 
     return "";
   }
