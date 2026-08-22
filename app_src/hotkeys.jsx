@@ -121,7 +121,12 @@ const HotkeysListner = React.memo(function HotkeysListner() {
         }
         const pointText = context.state.pastePointText;
         const padding = context.state.internalPadding || 0;
-        createTextLayerInSelection(line.text, style, pointText, padding, (ok) => {
+        const direction = context.state.direction;
+        const smartFit = {
+          enabled: context.state.enableSmartFit,
+          safeAreaRatio: context.state.smartFitSafeAreaRatio,
+        };
+        createTextLayerInSelection(line.text, style, pointText, padding, direction, smartFit, (ok) => {
           if (ok) context.dispatch({ type: "nextLine", add: true });
         });
       }

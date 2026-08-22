@@ -36,6 +36,8 @@ const storeFields = [
   "internalPadding",
   "interpretMarkdown",
   "styleSizeStep",
+  "enableSmartFit",
+  "smartFitSafeAreaRatio",
 ];
 
 const defaultShortcut = {
@@ -150,6 +152,8 @@ const initialState = {
   internalPadding: 10,
   interpretMarkdown: storage.data?.interpretMarkdown === true,
   styleSizeStep: 0.1,
+  enableSmartFit: storage.data?.enableSmartFit !== false,
+  smartFitSafeAreaRatio: typeof storage.data?.smartFitSafeAreaRatio === "number" ? storage.data.smartFitSafeAreaRatio : 0.9,
   ...storage.data,
   theme: "default",
   shortcut: { ...defaultShortcut, ...(storage.data?.shortcut || {}) },
@@ -648,6 +652,18 @@ const reducer = (state, action) => {
 
     case "setInterpretMarkdown": {
       newState.interpretMarkdown = action.value !== false;
+      break;
+    }
+
+    case "setEnableSmartFit": {
+      newState.enableSmartFit = action.value !== false;
+      break;
+    }
+
+    case "setSmartFitSafeAreaRatio": {
+      let ratio = parseFloat(action.value);
+      if (isNaN(ratio) || ratio <= 0 || ratio > 1) ratio = 0.9;
+      newState.smartFitSafeAreaRatio = ratio;
       break;
     }
   }

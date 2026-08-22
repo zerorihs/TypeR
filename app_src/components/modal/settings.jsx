@@ -56,6 +56,12 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [interpretMarkdown, setInterpretMarkdown] = React.useState(
     context.state.interpretMarkdown !== false
   );
+  const [enableSmartFit, setEnableSmartFit] = React.useState(
+    context.state.enableSmartFit !== false
+  );
+  const [smartFitSafeAreaRatio, setSmartFitSafeAreaRatio] = React.useState(
+    context.state.smartFitSafeAreaRatio !== undefined ? String(context.state.smartFitSafeAreaRatio) : "0.9"
+  );
   const [edited, setEdited] = React.useState(false);
 
   // States manager
@@ -180,6 +186,16 @@ const SettingsModal = React.memo(function SettingsModal() {
     setEdited(true);
   };
 
+  const changeEnableSmartFit = (e) => {
+    setEnableSmartFit(e.target.checked);
+    setEdited(true);
+  };
+
+  const changeSmartFitSafeAreaRatio = (e) => {
+    setSmartFitSafeAreaRatio(e.target.value);
+    setEdited(true);
+  };
+
   const save = (e) => {
     e.preventDefault();
     if (pastePointText !== context.state.pastePointText) {
@@ -301,6 +317,19 @@ const SettingsModal = React.memo(function SettingsModal() {
       context.dispatch({
         type: "setInterpretMarkdown",
         value: interpretMarkdown,
+      });
+    }
+    if (enableSmartFit !== context.state.enableSmartFit) {
+      context.dispatch({
+        type: "setEnableSmartFit",
+        value: enableSmartFit,
+      });
+    }
+    const parsedRatio = parseFloat(smartFitSafeAreaRatio);
+    if (!isNaN(parsedRatio) && parsedRatio > 0 && parsedRatio <= 1 && parsedRatio !== context.state.smartFitSafeAreaRatio) {
+      context.dispatch({
+        type: "setSmartFitSafeAreaRatio",
+        value: parsedRatio,
       });
     }
     const shortcut = {};
@@ -732,7 +761,36 @@ const SettingsModal = React.memo(function SettingsModal() {
                     </div>
                   </label>
                 </div>
+                <div className="settings-checkbox-item">
+                  <label className="settings-checkbox-label">
+                    <input type="checkbox" checked={enableSmartFit} onChange={changeEnableSmartFit} />
+                    <div className="settings-checkbox-custom"></div>
+                    <div className="settings-checkbox-content">
+                      <span>{locale.settingsSmartFitLabel || "Enable SmartFit engine"}</span>
+                      <div className="settings-checkbox-hint">
+                        {locale.settingsSmartFitHint || "Dynamically fit font size into speech bubbles using binary search."}
+                      </div>
+                    </div>
+                  </label>
+                </div>
               </div>
+              {enableSmartFit && (
+                <div className="field" style={{ marginTop: "1rem" }}>
+                  <div className="field-label">{locale.settingsSmartFitSafeAreaRatioLabel || "SmartFit safe area ratio"}</div>
+                  <div className="field-input">
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.5"
+                      max="1.0"
+                      value={smartFitSafeAreaRatio}
+                      onChange={changeSmartFitSafeAreaRatio}
+                      className="topcoat-textarea"
+                    />
+                  </div>
+                  <div className="field-descr">{locale.settingsSmartFitSafeAreaRatioDescr || "Fraction of bubble bounds to use as text area (e.g. 0.9 = 90%)"}</div>
+                </div>
+              )}
               <div className="field">
                 <div className="field-label">{locale.settingsQuickStyleSizeStepLabel || "Quick size step"}</div>
                 <div className="field-input">

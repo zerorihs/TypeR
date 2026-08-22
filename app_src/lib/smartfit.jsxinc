@@ -1,0 +1,206 @@
+/* globals app, charID, jamText, jamEngine, executeAction, executeActionGet, ActionDescriptor, ActionReference, DialogModes, stringIDToTypeID, LayerKind, UnitValue, _ensureStyle, _checkSelection, _DEFAULT_ADJUST_SEQUENCE, _calculateSelectionDimensions, _createAndSetLayerText, _getCurrentTextLayerBounds, _resizeTextBoxToContent, _positionLayerWithinSelection, _changeToPointText, _setTextBoxSize */
+
+var SmartFitEngine = (function () {
+  function forceLayoutUpdate() {
+    try {
+      if (app.documents.length && app.activeDocument && app.activeDocument.activeLayer && app.activeDocument.activeLayer.kind === LayerKind.TEXT) {
+        var textItem = app.activeDocument.activeLayer.textItem;
+        textItem.contents = textItem.contents;
+      }
+    } catch (e1) {}
+    try {
+      var boundsTypeId = stringIDToTypeID("bounds");
+      var ref = new ActionReference();
+      ref.putProperty(charID.Property, boundsTypeId);
+      ref.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
+      executeActionGet(ref);
+    } catch (e2) {}
+  }
+
+  function getRenderedTextBounds() {
+    return _getCurrentTextLayerBounds();
+  }
+
+  function setLayerFontSize(size) {
+    // 1. DOM Assignment Attempt
+    try {
+      if (app.documents.length && app.activeDocument && app.activeDocument.activeLayer) {
+        var layer = app.activeDocument.activeLayer;
+        if (layer.kind === LayerKind.TEXT && layer.textItem) {
+          layer.textItem.size = new UnitValue(size, "pt");
+        }
+      }
+    } catch (domErr) {}
+
+    // 2. Action Manager Font Size Update
+    try {
+      var textParams = jamText.getLayerText();
+      if (textParams && textParams.layerText && textParams.layerText.textStyleRange) {
+        for (var i = 0; i < textParams.layerText.textStyleRange.length; i++) {
+          if (textParams.layerText.textStyleRange[i].textStyle) {
+            textParams.layerText.textStyleRange[i].textStyle.size = size;
+            textParams.layerText.textStyleRange[i].textStyle.impliedFontSize = size;
+          }
+        }
+        jamText.setLayerText(textParams);
+      }
+    } catch (e) {
+      try {
+        var descriptor = new ActionDescriptor();
+        var reference = new ActionReference();
+        reference.putProperty(charID.Property, charID.TextStyle);
+        reference.putEnumerated(charID.TextLayer, charID.Ordinal, charID.Target);
+        descriptor.putReference(charID.Null, reference);
+
+        var newTextStyle = new ActionDescriptor();
+        newTextStyle.putUnitDouble(charID.Size, charID.Point, size);
+        descriptor.putObject(charID.To, charID.TextStyle, newTextStyle);
+        executeAction(charID.Set, descriptor, DialogModes.NO);
+      } catch (err) {}
+    }
+  }
+
+  function forceFinalFontSize(size) {
+    try {
+      if (app.documents.length && app.activeDocument && app.activeDocument.activeLayer) {
+        var layer = app.activeDocument.activeLayer;
+        if (layer.kind === LayerKind.TEXT && layer.textItem) {
+          layer.textItem.size = new UnitValue(size, "pt");
+        }
+      }
+    } catch (e1) {}
+
+    setLayerFontSize(size);
+
+    try {
+      app.refresh();
+    } catch (e2) {}
+    forceLayoutUpdate();
+  }
+
+  function setLayerTracking(trackingValue) {
+    try {
+      var textParams = jamText.getLayerText();
+      if (textParams && textParams.layerText && textParams.layerText.textStyleRange) {
+        for (var i = 0; i < textParams.layerText.textStyleRange.length; i++) {
+          if (textParams.layerText.textStyleRange[i].textStyle) {
+            textParams.layerText.textStyleRange[i].textStyle.tracking = trackingValue;
+          }
+        }
+        jamText.setLayerText(textParams);
+      }
+    } catch (e) {}
+  }
+
+  function checkOverflow(renderedBounds, containerWidth, containerHeight) {
+    if (!renderedBounds) return false;
+    var heightOverflow = renderedBounds.height > (containerHeight + 0.5);
+    var widthOverflow = renderedBounds.width > (containerWidth + 0.5);
+    return heightOverflow || widthOverflow;
+  }
+
+  function fitTextInSelection(data, options) {
+    options = options || {};
+    var safeRatio = (typeof options.safeAreaRatio === "number" && options.safeAreaRatio > 0 && options.safeAreaRatio <= 1) ? options.safeAreaRatio : 0.9;
+    var minFontSize = (typeof options.minFontSize === "number") ? options.minFontSize : 6;
+
+    // Phase 1: Measure Unclipped Text Layout & Binary Search
+    var style = _ensureStyle(data.style);
+    var styleFontSize = 20;
+    if (style && style.textProps && style.textProps.layerText &&
+        style.textProps.layerText.textStyleRange &&
+        style.textProps.layerText.textStyleRange[0] &&
+        style.textProps.layerText.textStyleRange[0].textStyle &&
+        style.textProps.layerText.textStyleRange[0].textStyle.size) {
+      styleFontSize = style.textProps.layerText.textStyleRange[0].textStyle.size;
+    }
+
+    var selection = _checkSelection({
+      adjustSequence: _DEFAULT_ADJUST_SEQUENCE,
+      preExpandAmount: styleFontSize
+    });
+    if (selection.error) {
+      return selection.error;
+    }
+
+    var rawDimensions = _calculateSelectionDimensions(selection, options.padding || 0);
+    var containerWidth = rawDimensions.width * safeRatio;
+    var containerHeight = rawDimensions.height * safeRatio;
+
+    if (containerWidth <= 0 || containerHeight <= 0) {
+      containerWidth = rawDimensions.width;
+      containerHeight = rawDimensions.height;
+    }
+
+    // Insert text into temporary unclipped box (height = 99999)
+    _createAndSetLayerText(data, containerWidth, 99999);
+    forceLayoutUpdate();
+
+    var renderedBounds = getRenderedTextBounds();
+    var overflows = checkOverflow(renderedBounds, containerWidth, containerHeight);
+    var bestFittingSize = styleFontSize;
+
+    if (overflows) {
+      var low = minFontSize;
+      var high = styleFontSize;
+      bestFittingSize = minFontSize;
+      var maxIterations = 12;
+      var iter = 0;
+
+      while (low <= high && iter < maxIterations) {
+        iter++;
+        var mid = Math.floor(((low + high) / 2) * 2) / 2; // Precision 0.5pt
+        if (mid < minFontSize) break;
+
+        setLayerFontSize(mid);
+        forceLayoutUpdate();
+        var currentBounds = getRenderedTextBounds();
+        var currentOverflow = checkOverflow(currentBounds, containerWidth, containerHeight);
+
+        if (!currentOverflow) {
+          bestFittingSize = mid;
+          low = mid + 0.5;
+        } else {
+          high = mid - 0.5;
+        }
+      }
+    }
+
+    // Phase 2: Frame Shape & Centering
+    if (options.point) {
+      _changeToPointText();
+    } else {
+      var endBounds = getRenderedTextBounds();
+      _resizeTextBoxToContent(containerWidth, endBounds);
+    }
+    var finalLayerBounds = getRenderedTextBounds();
+    _positionLayerWithinSelection(selection, finalLayerBounds);
+
+    // Final tracking fallback if still overflows at min font size
+    if (checkOverflow(finalLayerBounds, containerWidth, containerHeight)) {
+      var fallbackTrackings = [-10, -20, -35, -50];
+      for (var t = 0; t < fallbackTrackings.length; t++) {
+        setLayerTracking(fallbackTrackings[t]);
+        forceLayoutUpdate();
+        var fbBounds = getRenderedTextBounds();
+        if (!checkOverflow(fbBounds, containerWidth, containerHeight)) {
+          break;
+        }
+      }
+    }
+
+    // Phase 3: Absolute Last Command - Force Final Font Size
+    forceFinalFontSize(bestFittingSize);
+
+    return "";
+  }
+
+  return {
+    fitTextInSelection: fitTextInSelection,
+    forceLayoutUpdate: forceLayoutUpdate,
+    setLayerFontSize: setLayerFontSize,
+    forceFinalFontSize: forceFinalFontSize,
+    setLayerTracking: setLayerTracking,
+    checkOverflow: checkOverflow
+  };
+})();

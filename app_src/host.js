@@ -1028,6 +1028,17 @@ function _createTextLayerInSelection() {
     return;
   }
   
+  var smartFitOpts = state.data && state.data.smartFit;
+  if (smartFitOpts && smartFitOpts.enabled !== false && typeof SmartFitEngine !== "undefined") {
+    state.result = SmartFitEngine.fitTextInSelection(state.data, {
+      point: state.point,
+      padding: state.padding,
+      safeAreaRatio: smartFitOpts.safeAreaRatio,
+      minFontSize: smartFitOpts.minFontSize
+    });
+    return;
+  }
+
   // Get the text size from the style to pre-expand/dilate selection
   var textSize = _hostState.fallbackTextSize || 20;
   var style = _ensureStyle(state.data.style);

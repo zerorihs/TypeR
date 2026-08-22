@@ -285,7 +285,11 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       const pointText = context.state.pastePointText;
       const padding = context.state.internalPadding || 0;
       const direction = context.state.direction;
-      createTextLayerInSelection(line.text, lineStyle, pointText, padding, direction, (ok) => {
+      const smartFit = {
+        enabled: context.state.enableSmartFit,
+        safeAreaRatio: context.state.smartFitSafeAreaRatio,
+      };
+      createTextLayerInSelection(line.text, lineStyle, pointText, padding, direction, smartFit, (ok) => {
         if (ok) context.dispatch({ type: "nextLine", add: true });
       });
     }
