@@ -70,10 +70,11 @@ var SmartFitEngine = (function () {
   // Smart Fit v3: Safe Area Calculation based on Bubble Geometry and Padding
   function calculateSafeArea(width, height, customRatio, padding) {
     var ratio;
+    var R = width / (height || 1);
+
     if (typeof customRatio === "number" && customRatio > 0 && customRatio <= 1) {
       ratio = customRatio;
     } else {
-      var R = width / (height || 1);
       if (R < 0.6) {
         ratio = 0.65;
       } else if (R < 0.9) {
@@ -86,7 +87,14 @@ var SmartFitEngine = (function () {
     }
 
     var targetWidth = width * ratio;
-    var targetHeight = Math.min(height * Math.sqrt(1 - ratio * ratio) * 0.95, height * ratio);
+    var targetHeight;
+
+    // Auto-detect vertical bubble/box (R < 0.9) to allow more vertical space (85%)
+    if (R < 0.9) {
+      targetHeight = height * 0.85;
+    } else {
+      targetHeight = Math.min(height * Math.sqrt(1 - ratio * ratio) * 0.95, height * ratio);
+    }
 
     if (padding > 0) {
       targetWidth = Math.max(targetWidth - padding * 2, 50);
