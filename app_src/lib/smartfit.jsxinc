@@ -12,6 +12,7 @@ var SmartFitEngine = (function () {
   }
 
   function setLayerFontSize(size) {
+    size = Math.round(size);
     try {
       if (app.documents.length && app.activeDocument && app.activeDocument.activeLayer) {
         var layer = app.activeDocument.activeLayer;
@@ -100,9 +101,9 @@ var SmartFitEngine = (function () {
   function fitTextInSelection(data, options) {
     options = options || {};
     var safeAreaRatio = options.safeAreaRatio;
-    var minFontSize = (typeof options.minFontSize === "number") ? options.minFontSize : 6;
+    var minFontSize = Math.floor((typeof options.minFontSize === "number") ? options.minFontSize : 6);
 
-    // Step 1: Ensure Style & Get Original Font Size
+    // Step 1: Ensure Style & Get Original Font Size (Integer)
     var style = _ensureStyle(data.style);
     var styleFontSize = 20;
     if (style && style.textProps && style.textProps.layerText &&
@@ -112,6 +113,7 @@ var SmartFitEngine = (function () {
         style.textProps.layerText.textStyleRange[0].textStyle.size) {
       styleFontSize = style.textProps.layerText.textStyleRange[0].textStyle.size;
     }
+    styleFontSize = Math.floor(styleFontSize);
 
     // Step 2: Selection Bounds & Safe Text Area
     var selection = _checkSelection({
@@ -135,15 +137,14 @@ var SmartFitEngine = (function () {
     var isOverflow = checkOverflow(initialBounds, containerWidth, containerHeight);
     var bestFittingSize = styleFontSize;
 
-    // Step 4: Binary Search for Maximum Fitting Font Size (5 iterations max)
+    // Step 4: Integer-Only Binary Search for Maximum Fitting Font Size
     if (isOverflow) {
       var low = minFontSize;
       var high = styleFontSize;
       bestFittingSize = minFontSize;
-      var maxIterations = 5;
 
-      for (var iter = 0; iter < maxIterations; iter++) {
-        var mid = Math.floor(((low + high) / 2) * 10) / 10;
+      while (low <= high) {
+        var mid = Math.floor((low + high) / 2);
         if (mid < minFontSize) break;
 
         setLayerFontSize(mid);
@@ -153,14 +154,14 @@ var SmartFitEngine = (function () {
 
         if (!currentOverflow) {
           bestFittingSize = mid;
-          low = mid + 0.1; // Fits! Try larger font size
+          low = mid + 1; // Fits! Try larger integer font size
         } else {
-          high = mid - 0.1; // Overflows! Try smaller font size
+          high = mid - 1; // Overflows! Try smaller integer font size
         }
       }
     }
 
-    // Step 5: Set Optimal Font Size
+    // Step 5: Set Optimal Integer Font Size
     setLayerFontSize(bestFittingSize);
     forceLayoutUpdate();
 
@@ -187,7 +188,7 @@ var SmartFitEngine = (function () {
       }
     }
 
-    // Step 8: Re-apply final font size
+    // Step 8: Re-apply final integer font size
     setLayerFontSize(bestFittingSize);
     forceLayoutUpdate();
 
