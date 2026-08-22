@@ -21,29 +21,6 @@ var SmartFitEngine = (function () {
         }
       }
     } catch (e1) {}
-
-    try {
-      var idset = charIDToTypeID("set ");
-      var idnull = charIDToTypeID("null");
-      var idTxLr = charIDToTypeID("TxLr");
-      var idOrdn = charIDToTypeID("Ordn");
-      var idTrgt = charIDToTypeID("Trgt");
-      var idT = charIDToTypeID("T   ");
-      var idTxtS = charIDToTypeID("TxtS");
-      var idSz = charIDToTypeID("Sz  ");
-      var idPnt = charIDToTypeID("#Pnt");
-
-      var desc1 = new ActionDescriptor();
-      var ref1 = new ActionReference();
-      ref1.putProperty(idTxtS, idTxLr);
-      ref1.putEnumerated(idTxLr, idOrdn, idTrgt);
-      desc1.putReference(idnull, ref1);
-
-      var desc2 = new ActionDescriptor();
-      desc2.putUnitDouble(idSz, idPnt, size);
-      desc1.putObject(idT, idTxtS, desc2);
-      executeAction(idset, desc1, DialogModes.NO);
-    } catch (err) {}
   }
 
   function setLayerTracking(trackingValue) {

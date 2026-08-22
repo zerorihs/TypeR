@@ -265,29 +265,45 @@ function _runSmartFit(targetWidth, targetHeight, selection) {
     _changeToBoxText();
   }
 
-  // Calculate optimized width and height for elliptical fit (avoid corner clipping)
+  // Calculate optimized width and height based on aspect ratio
   var finalTargetWidth = targetWidth;
   var effectiveTargetHeight = targetHeight;
 
-  if (selection && typeof selection.width === "number" && selection.width > 0) {
-    var padding = _hostState.createTextLayerInSelection.padding || 0;
-    // Set width to the optimal ellipse inscribed rectangle width (~72% of bubble width)
-    finalTargetWidth = selection.width * 0.72;
-    if (padding > 0) {
-      finalTargetWidth = Math.max(finalTargetWidth - padding * 2, _MIN_TEXTBOX_WIDTH);
-    }
-    
-    var wRatio = finalTargetWidth / selection.width;
-    if (wRatio < 1) {
-      // Height limit for the inscribed rectangle
-      effectiveTargetHeight = selection.height * Math.sqrt(1 - wRatio * wRatio) * 0.95;
-    } else {
-      effectiveTargetHeight = targetHeight * 0.72;
-    }
+  var padding = _hostState.createTextLayerInSelection.padding || 0;
+
+  var ratio = targetWidth / targetHeight;
+  if (selection && typeof selection.width === "number" && selection.width > 0 && typeof selection.height === "number" && selection.height > 0) {
+    ratio = selection.width / selection.height;
+  }
+
+  var safeWidth = 0.90;
+  var safeHeight = 0.90;
+
+  if (ratio > 2.0) {
+    safeWidth = 0.90;
+    safeHeight = 0.82;
+  } else if (ratio > 1.2) {
+    safeWidth = 0.90;
+    safeHeight = 0.85;
+  } else if (ratio >= 0.8) {
+    safeWidth = 0.90;
+    safeHeight = 0.90;
   } else {
-    // Fallback if no selection is passed (fitting to existing box)
-    finalTargetWidth = targetWidth * 0.8;
-    effectiveTargetHeight = targetHeight * 0.72;
+    safeWidth = 0.88;
+    safeHeight = 0.90;
+  }
+
+  if (selection && typeof selection.width === "number" && selection.width > 0 && typeof selection.height === "number" && selection.height > 0) {
+    finalTargetWidth = selection.width * safeWidth;
+    effectiveTargetHeight = selection.height * safeHeight;
+  } else {
+    finalTargetWidth = targetWidth * safeWidth;
+    effectiveTargetHeight = targetHeight * safeHeight;
+  }
+
+  if (padding > 0) {
+    finalTargetWidth = Math.max(finalTargetWidth - padding * 2, _MIN_TEXTBOX_WIDTH);
+    effectiveTargetHeight = Math.max(effectiveTargetHeight - padding * 2, _MIN_TEXTBOX_WIDTH);
   }
 
   // Set initial text box width to finalTargetWidth. We set the height to a large value initially so text doesn't overflow during measurement.
@@ -306,61 +322,37 @@ function _runSmartFit(targetWidth, targetHeight, selection) {
   var currentSize = originalSize;
   var currentTracking = textStyle.tracking || 0;
 
-  var maxIterations = 20;
-  var minSize = Math.max(6, originalSize * 0.4); // Don't go below 6pt or 40% of original size
+  var step = 4;
+  var minSize = 4;
 
-  for (var iter = 0; iter < maxIterations; iter++) {
-    // Measure current bounds of the rendered text pixels
-    var bounds = _getCurrentTextLayerBounds();
-    var textHeight = bounds.height;
-    var textWidth = bounds.width;
+  // Measure initial text bounds
+  var bounds = _getCurrentTextLayerBounds();
+  var isOverflow = (bounds.height > effectiveTargetHeight || bounds.width > finalTargetWidth);
 
-    // Check if it fits within the elliptical bounds
-    if (textHeight <= effectiveTargetHeight && textWidth <= finalTargetWidth) {
-      break; // Fits!
-    }
-
-    // Try reducing size
-    if (currentSize > minSize) {
-      currentSize -= 1.0; // Reduce by 1 unit
-      if (currentSize < minSize) currentSize = minSize;
-    } else {
-      // If we are already at minimum size and still don't fit, try tightening tracking
-      if (currentTracking > -50) {
-        currentTracking -= 10;
-      } else {
-        break; // Can't reduce further
+  if (isOverflow) {
+    // Stage 1: Coarse decrement (step by 4)
+    while (isOverflow && currentSize > minSize) {
+      currentSize -= step;
+      if (currentSize < minSize) {
+        currentSize = minSize;
       }
+      _applySizeAndLeading(currentSize, hasLeading, originalLeading, originalSize);
+      bounds = _getCurrentTextLayerBounds();
+      isOverflow = (bounds.height > effectiveTargetHeight || bounds.width > finalTargetWidth);
     }
 
-    // Apply new size, leading, tracking
-    var newStyle = {
-      size: currentSize,
-      tracking: currentTracking
-    };
-    if (hasLeading) {
-      newStyle.autoLeading = false;
-      newStyle.leading = currentSize * (originalLeading / originalSize);
-    } else {
-      newStyle.autoLeading = true;
-    }
-
-    // Update layer text style
-    var updatedParams = jamText.getLayerText();
-    if (updatedParams && updatedParams.layerText && updatedParams.layerText.textStyleRange) {
-      for (var i = 0; i < updatedParams.layerText.textStyleRange.length; i++) {
-        var styleObj = updatedParams.layerText.textStyleRange[i].textStyle;
-        styleObj.size = newStyle.size;
-        styleObj.tracking = newStyle.tracking;
-        if (newStyle.autoLeading) {
-          styleObj.autoLeading = true;
-          if (styleObj.hasOwnProperty("leading")) delete styleObj.leading;
-        } else {
-          styleObj.autoLeading = false;
-          styleObj.leading = newStyle.leading;
-        }
+    // Stage 2: Fine refinement increment (step by 1)
+    while (!isOverflow && currentSize < originalSize) {
+      currentSize += 1;
+      _applySizeAndLeading(currentSize, hasLeading, originalLeading, originalSize);
+      bounds = _getCurrentTextLayerBounds();
+      isOverflow = (bounds.height > effectiveTargetHeight || bounds.width > finalTargetWidth);
+      if (isOverflow) {
+        // We just overflowed again, revert to the last size that fitted
+        currentSize -= 1;
+        _applySizeAndLeading(currentSize, hasLeading, originalLeading, originalSize);
+        break;
       }
-      jamText.setLayerText(updatedParams);
     }
   }
 
@@ -369,6 +361,23 @@ function _runSmartFit(targetWidth, targetHeight, selection) {
   _setTextBoxSize(finalTargetWidth, finalBounds.height + currentSize + 2);
 }
 
+function _applySizeAndLeading(size, hasLeading, originalLeading, originalSize) {
+  var updatedParams = jamText.getLayerText();
+  if (updatedParams && updatedParams.layerText && updatedParams.layerText.textStyleRange) {
+    for (var i = 0; i < updatedParams.layerText.textStyleRange.length; i++) {
+      var styleObj = updatedParams.layerText.textStyleRange[i].textStyle;
+      styleObj.size = size;
+      if (hasLeading) {
+        styleObj.autoLeading = false;
+        styleObj.leading = size * (originalLeading / originalSize);
+      } else {
+        styleObj.autoLeading = true;
+        if (styleObj.hasOwnProperty("leading")) delete styleObj.leading;
+      }
+    }
+    jamText.setLayerText(updatedParams);
+  }
+}
 function _runSmartFitOnActiveLayer(data) {
   // Try to get active selection bounds first
   var selection = _getCurrentSelectionBounds();
