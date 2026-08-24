@@ -19,7 +19,7 @@ if (-not (Test-Path $ManifestPath)) {
 
 # --- 3. Extraction de la version (plus precis que findstr) ---
 $Content = Get-Content $ManifestPath -Raw
-if ($Content -match 'Extension Id="typer".*?Version="([^"]+)"') {
+if ($Content -match 'Extension Id="typer-dynamic".*?Version="([^"]+)"') {
     $ExtVersion = $matches[1]
 } else {
     $ExtVersion = "Inconnue"
@@ -30,37 +30,37 @@ if ($Content -match 'Extension Id="typer".*?Version="([^"]+)"') {
 $Lang = $Host.CurrentCulture.TwoLetterISOLanguageName
 
 # Valeurs par defaut (Anglais)
-$msg_install  = "Photoshop extension TypeR v$ExtVersion will be installed."
+$msg_install  = "Photoshop extension TypeR Dynamic v$ExtVersion will be installed."
 $msg_close    = "Close Photoshop (if it is open)."
 $msg_complete = "Installation completed."
-$msg_open     = "Open Photoshop and in the upper menu click the following: [Window] > [Extensions] > [TypeR]"
+$msg_open     = "Open Photoshop and in the upper menu click the following: [Window] > [Extensions] > [TypeR Dynamic]"
 $msg_pause    = "Press Enter to continue..."
 $msg_credits  = "Many thanks to Swirt for TyperTools and SeanR & Sakushi for this fork."
 $msg_discord  = "ScanR's Discord if you need help: https://discord.com/invite/Pdmfmqk"
 
 if ($Lang -eq "fr") {
-    $msg_install  = "L'extension Photoshop TypeR v$ExtVersion sera installee."
+    $msg_install  = "L'extension Photoshop TypeR Dynamic v$ExtVersion sera installee."
     $msg_close    = "Fermez Photoshop (s'il est ouvert)."
     $msg_complete = "Installation terminee."
-    $msg_open     = "Ouvrez Photoshop et dans le menu superieur cliquez sur : [Fenetre] > [Extensions] > [TypeR]"
+    $msg_open     = "Ouvrez Photoshop et dans le menu superieur cliquez sur : [Fenetre] > [Extensions] > [TypeR Dynamic]"
     $msg_pause    = "Appuyez sur Entree pour continuer..."
-    $msg_credits  = "Merci beaucoup et Swirt pour TyperTools et SeanR & Sakushi pour ce fork."
+    $msg_credits  = "Merci beaucoup a Swirt for TyperTools et SeanR & Sakushi pour ce fork."
     $msg_discord  = "Discord de ScanR si besoin d'aide : https://discord.com/invite/Pdmfmqk"
 }
 elseif ($Lang -eq "es") {
-    $msg_install  = "La extensión de Photoshop TypeR v$ExtVersion se instalará."
+    $msg_install  = "La extensión de Photoshop TypeR Dynamic v$ExtVersion se instalará."
     $msg_close    = "Cierra Photoshop (si está abierto)."
     $msg_complete = "Instalación completada."
-    $msg_open     = "Abre Photoshop y en el menú superior haz clic en lo siguiente: [Ventana] > [Extensiones] > [TypeR]"
+    $msg_open     = "Abre Photoshop y en el menú superior haz clic en lo siguiente: [Ventana] > [Extensiones] > [TypeR Dynamic]"
     $msg_pause    = "Presiona Enter para continuar..."
     $msg_credits  = "Muchas gracias a Swirt por TyperTools y a SeanR & Sakushi por este fork."
     $msg_discord  = "Discord de ScanR si necesitas ayuda: https://discord.com/invite/Pdmfmqk"
 }
 elseif ($Lang -eq "pt") {
-    $msg_install  = "Photoshop extension TypeR v$ExtVersion will be installed."
+    $msg_install  = "Photoshop extension TypeR Dynamic v$ExtVersion will be installed."
     $msg_close    = "Feche o Photoshop (se estiver aberto)."
     $msg_complete = "Instalação concluída."
-    $msg_open     = "Abra o Photoshop e no menu superior clique em: [Janela] > [Extensões] > [TypeR]"
+    $msg_open     = "Abra o Photoshop e no menu superior clique em: [Janela] > [Extensões] > [TypeR Dynamic]"
     $msg_pause    = "Pressione Enter para continuar..."
     $msg_credits  = "Muito obrigado a Swirt pelo TyperTools e a SeanR & Sakushi por este fork."
     $msg_discord  = "Discord do ScanR se precisar de ajuda: https://discord.com/invite/Pdmfmqk"
@@ -68,30 +68,31 @@ elseif ($Lang -eq "pt") {
 
 Clear-Host
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Cyan
-Write-Host "|                          TypeR Installer                         |" -ForegroundColor Cyan
+Write-Host "|                       TypeR Dynamic Installer                    |" -ForegroundColor Cyan
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "? $msg_install"
+Write-Host "- $msg_install"
 Write-Host ""
-Write-Host "? $msg_close" -ForegroundColor Yellow
+Write-Host "- $msg_close" -ForegroundColor Yellow
 Write-Host ""
-Read-Host -Prompt "? $msg_pause"
+Read-Host -Prompt "- $msg_pause"
 
 # --- 5. Mode Debug (CSXS 6 e 12) ---
-# Ne necessite pas les droits admin car c'est dans HKCU (Utilisateur courant)
+# Active le mode debug et cree les cles si non existantes
 6..12 | ForEach-Object {
     $RegPath = "HKCU:\Software\Adobe\CSXS.$_"
-    if (Test-Path $RegPath) {
-        Set-ItemProperty -Path $RegPath -Name "PlayerDebugMode" -Value 1 -Type String -ErrorAction SilentlyContinue
+    if (-not (Test-Path $RegPath)) {
+        New-Item -Path $RegPath -Force -ErrorAction SilentlyContinue | Out-Null
     }
+    Set-ItemProperty -Path $RegPath -Name "PlayerDebugMode" -Value 1 -Type String -Force -ErrorAction SilentlyContinue
 }
 
 # --- 6. Gestion des dossiers ---
 $AppData = $env:APPDATA
-$TargetDir = Join-Path $AppData "Adobe\CEP\extensions\typertools"
+$TargetDir = Join-Path $AppData "Adobe\CEP\extensions\typertools-dynamic"
 
 # On cree un dossier TEMP pour contenir la sauvegarde (et non le fichier lui-meme)
-$TempBackupContainer = Join-Path $env:TEMP "typer_backup_container"
+$TempBackupContainer = Join-Path $env:TEMP "typer_dynamic_backup_container"
 
 # Nettoyage prealable du temp au cas où
 if (Test-Path $TempBackupContainer) { Remove-Item $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue }

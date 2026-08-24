@@ -265,45 +265,29 @@ function _runSmartFit(targetWidth, targetHeight, selection) {
     _changeToBoxText();
   }
 
-  // Calculate optimized width and height based on aspect ratio
+  // Calculate optimized width and height for elliptical fit (avoid corner clipping)
   var finalTargetWidth = targetWidth;
   var effectiveTargetHeight = targetHeight;
 
-  var padding = _hostState.createTextLayerInSelection.padding || 0;
-
-  var ratio = targetWidth / targetHeight;
-  if (selection && typeof selection.width === "number" && selection.width > 0 && typeof selection.height === "number" && selection.height > 0) {
-    ratio = selection.width / selection.height;
-  }
-
-  var safeWidth = 0.90;
-  var safeHeight = 0.90;
-
-  if (ratio > 2.0) {
-    safeWidth = 0.90;
-    safeHeight = 0.82;
-  } else if (ratio > 1.2) {
-    safeWidth = 0.90;
-    safeHeight = 0.85;
-  } else if (ratio >= 0.8) {
-    safeWidth = 0.90;
-    safeHeight = 0.90;
+  if (selection && typeof selection.width === "number" && selection.width > 0) {
+    var padding = _hostState.createTextLayerInSelection.padding || 0;
+    // Set width to the optimal ellipse inscribed rectangle width (~72% of bubble width)
+    finalTargetWidth = selection.width * 0.72;
+    if (padding > 0) {
+      finalTargetWidth = Math.max(finalTargetWidth - padding * 2, _MIN_TEXTBOX_WIDTH);
+    }
+    
+    var wRatio = finalTargetWidth / selection.width;
+    if (wRatio < 1) {
+      // Height limit for the inscribed rectangle
+      effectiveTargetHeight = selection.height * Math.sqrt(1 - wRatio * wRatio) * 0.95;
+    } else {
+      effectiveTargetHeight = targetHeight * 0.72;
+    }
   } else {
-    safeWidth = 0.88;
-    safeHeight = 0.90;
-  }
-
-  if (selection && typeof selection.width === "number" && selection.width > 0 && typeof selection.height === "number" && selection.height > 0) {
-    finalTargetWidth = selection.width * safeWidth;
-    effectiveTargetHeight = selection.height * safeHeight;
-  } else {
-    finalTargetWidth = targetWidth * safeWidth;
-    effectiveTargetHeight = targetHeight * safeHeight;
-  }
-
-  if (padding > 0) {
-    finalTargetWidth = Math.max(finalTargetWidth - padding * 2, _MIN_TEXTBOX_WIDTH);
-    effectiveTargetHeight = Math.max(effectiveTargetHeight - padding * 2, _MIN_TEXTBOX_WIDTH);
+    // Fallback if no selection is passed (fitting to existing box)
+    finalTargetWidth = targetWidth * 0.8;
+    effectiveTargetHeight = targetHeight * 0.72;
   }
 
   // Set initial text box width to finalTargetWidth. We set the height to a large value initially so text doesn't overflow during measurement.
@@ -322,62 +306,69 @@ function _runSmartFit(targetWidth, targetHeight, selection) {
   var currentSize = originalSize;
   var currentTracking = textStyle.tracking || 0;
 
-  var step = 4;
-  var minSize = 4;
+  var maxIterations = 20;
+  var minSize = Math.max(6, originalSize * 0.4); // Don't go below 6pt or 40% of original size
 
-  // Measure initial text bounds
-  var bounds = _getCurrentTextLayerBounds();
-  var isOverflow = (bounds.height > effectiveTargetHeight || bounds.width > finalTargetWidth);
+  for (var iter = 0; iter < maxIterations; iter++) {
+    // Measure current bounds of the rendered text pixels
+    var bounds = _getCurrentTextLayerBounds();
+    var textHeight = bounds.height;
+    var textWidth = bounds.width;
 
-  if (isOverflow) {
-    // Snap originalSize to the nearest multiple of 4 below it first
-    currentSize = Math.floor(originalSize / step) * step;
-    if (currentSize < minSize) {
-      currentSize = minSize;
+    // Check if it fits within the elliptical bounds
+    if (textHeight <= effectiveTargetHeight && textWidth <= finalTargetWidth) {
+      break; // Fits!
     }
-    _applySizeAndLeading(currentSize, hasLeading, originalLeading, originalSize);
-    bounds = _getCurrentTextLayerBounds();
-    isOverflow = (bounds.height > effectiveTargetHeight || bounds.width > finalTargetWidth);
 
-    while (isOverflow && currentSize > minSize) {
-      currentSize -= step;
-      if (currentSize < minSize) {
-        currentSize = minSize;
+    // Try reducing size
+    if (currentSize > minSize) {
+      currentSize -= 1.0; // Reduce by 1 unit
+      if (currentSize < minSize) currentSize = minSize;
+    } else {
+      // If we are already at minimum size and still don't fit, try tightening tracking
+      if (currentTracking > -50) {
+        currentTracking -= 10;
+      } else {
+        break; // Can't reduce further
       }
-      _applySizeAndLeading(currentSize, hasLeading, originalLeading, originalSize);
-      bounds = _getCurrentTextLayerBounds();
-      isOverflow = (bounds.height > effectiveTargetHeight || bounds.width > finalTargetWidth);
+    }
+
+    // Apply new size, leading, tracking
+    var newStyle = {
+      size: currentSize,
+      tracking: currentTracking
+    };
+    if (hasLeading) {
+      newStyle.autoLeading = false;
+      newStyle.leading = currentSize * (originalLeading / originalSize);
+    } else {
+      newStyle.autoLeading = true;
+    }
+
+    // Update layer text style
+    var updatedParams = jamText.getLayerText();
+    if (updatedParams && updatedParams.layerText && updatedParams.layerText.textStyleRange) {
+      for (var i = 0; i < updatedParams.layerText.textStyleRange.length; i++) {
+        var styleObj = updatedParams.layerText.textStyleRange[i].textStyle;
+        styleObj.size = newStyle.size;
+        styleObj.tracking = newStyle.tracking;
+        if (newStyle.autoLeading) {
+          styleObj.autoLeading = true;
+          if (styleObj.hasOwnProperty("leading")) delete styleObj.leading;
+        } else {
+          styleObj.autoLeading = false;
+          styleObj.leading = newStyle.leading;
+        }
+      }
+      jamText.setLayerText(updatedParams);
     }
   }
 
   // After fitting, adjust the final text box height to fit the content exactly
   var finalBounds = _getCurrentTextLayerBounds();
   _setTextBoxSize(finalTargetWidth, finalBounds.height + currentSize + 2);
-
-  // Auto Re-align after resize if selection is available
-  if (selection) {
-    var alignedBounds = _getCurrentTextLayerBounds();
-    _positionLayerWithinSelection(selection, alignedBounds);
-  }
 }
 
-function _applySizeAndLeading(size, hasLeading, originalLeading, originalSize) {
-  var updatedParams = jamText.getLayerText();
-  if (updatedParams && updatedParams.layerText && updatedParams.layerText.textStyleRange) {
-    for (var i = 0; i < updatedParams.layerText.textStyleRange.length; i++) {
-      var styleObj = updatedParams.layerText.textStyleRange[i].textStyle;
-      styleObj.size = size;
-      if (hasLeading) {
-        styleObj.autoLeading = false;
-        styleObj.leading = size * (originalLeading / originalSize);
-      } else {
-        styleObj.autoLeading = true;
-        if (styleObj.hasOwnProperty("leading")) delete styleObj.leading;
-      }
-    }
-    jamText.setLayerText(updatedParams);
-  }
-}
 function _runSmartFitOnActiveLayer(data) {
   // Try to get active selection bounds first
   var selection = _getCurrentSelectionBounds();
@@ -386,9 +377,13 @@ function _runSmartFitOnActiveLayer(data) {
   var padding = data.padding || _hostState.createTextLayerInSelection.padding || 0;
 
   if (selection !== undefined) {
-    var dimensions = _calculateSelectionDimensions(selection, padding);
-    targetWidth = dimensions.width;
-    targetHeight = dimensions.height;
+    SmartFitEngine.fitTextInSelection(data, {
+      safeAreaRatio: null,
+      minFontSize: 6,
+      maxFontSize: 300,
+      padding: padding,
+      point: _textLayerIsPointText()
+    });
   } else {
     // No selection, try to use current text layer bounds
     try {
@@ -401,10 +396,10 @@ function _runSmartFitOnActiveLayer(data) {
         }
       }
     } catch (e) {}
-  }
-
-  if (targetWidth > 0 && targetHeight > 0) {
-    _runSmartFit(targetWidth, targetHeight, selection);
+    
+    if (targetWidth > 0 && targetHeight > 0) {
+      _runSmartFit(targetWidth, targetHeight, selection);
+    }
   }
 }
 
@@ -650,22 +645,72 @@ function _selectionBoundsKey(bounds) {
   return bounds.xMid + "_" + bounds.yMid + "_" + bounds.width + "_" + bounds.height;
 }
 
+function _isSelectionRectangular(bounds) {
+  try {
+    var doc = app.activeDocument;
+    var tempChannel = doc.channels.add();
+    tempChannel.name = "TempSelectionCheck";
+    doc.selection.store(tempChannel);
+    
+    // Select the bounding box rectangle
+    doc.selection.select([
+      [bounds.left, bounds.top],
+      [bounds.right, bounds.top],
+      [bounds.right, bounds.bottom],
+      [bounds.left, bounds.bottom]
+    ]);
+    
+    // Subtract the original selection
+    doc.selection.load(tempChannel, SelectionType.SUBTRACT);
+    
+    var isRect = false;
+    try {
+      var remainingBounds = doc.selection.bounds;
+      isRect = false;
+    } catch (e) {
+      isRect = true;
+    }
+    
+    // Restore selection and clean up
+    doc.selection.load(tempChannel, SelectionType.REPLACE);
+    tempChannel.remove();
+    return isRect;
+  } catch (err) {
+    return false;
+  }
+}
+
 function _calculateSelectionDimensions(selection, padding) {
   if (!selection) return { width: 0, height: 0 };
-  var width = selection.width * _DEFAULT_SELECTION_SCALE;
-  if (padding > 0) {
-    width = Math.max(width - padding * 2, _MIN_TEXTBOX_WIDTH);
+  var isRect = _isSelectionRectangular(selection);
+  var width;
+  var height = selection.height;
+  
+  if (isRect) {
+    width = selection.width;
+    if (padding > 0) {
+      width = Math.max(width - padding, _MIN_TEXTBOX_WIDTH);
+      height = Math.max(height - padding, _MIN_TEXTBOX_WIDTH);
+    }
+  } else {
+    width = selection.width * _DEFAULT_SELECTION_SCALE;
+    if (padding > 0) {
+      width = Math.max(width - padding * 2, _MIN_TEXTBOX_WIDTH);
+      height = Math.max(height - padding * 2, _MIN_TEXTBOX_WIDTH);
+    }
   }
+  
   return {
     width: width,
-    height: selection.height,
+    height: height,
   };
 }
 
 function _resizeTextBoxToContent(width, currentBounds) {
   var textParams = jamText.getLayerText();
   var textSize = textParams.layerText.textStyleRange[0].textStyle.size;
-  _setTextBoxSize(width, currentBounds.height + textSize + 2);
+  var finalWidth = Math.min(width, Math.ceil(currentBounds.width) + 4);
+  _setTextBoxSize(finalWidth, currentBounds.height + textSize + 2);
 }
 
 function _positionLayerWithinSelection(selection, bounds) {
@@ -1206,20 +1251,30 @@ function _createTextLayerInSelection() {
     state.result = selection.error;
     return;
   }
-  var dimensions = _calculateSelectionDimensions(selection, state.padding);
-  _createAndSetLayerText(state.data, dimensions.width, dimensions.height);
   if (state.data.enableSmartFitOnPaste) {
-    _runSmartFit(dimensions.width, dimensions.height, selection);
+    var error = SmartFitEngine.fitTextInSelection(state.data, {
+      safeAreaRatio: null,
+      minFontSize: 6,
+      maxFontSize: 300,
+      padding: state.padding || 0,
+      point: state.point
+    });
+    if (error) {
+      state.result = error;
+      return;
+    }
   } else {
+    var dimensions = _calculateSelectionDimensions(selection, state.padding);
+    _createAndSetLayerText(state.data, dimensions.width, dimensions.height);
     var bounds = _getCurrentTextLayerBounds();
     if (state.point) {
       _changeToPointText();
     } else {
       _resizeTextBoxToContent(dimensions.width, bounds);
     }
+    var finalBounds = _getCurrentTextLayerBounds();
+    _positionLayerWithinSelection(selection, finalBounds);
   }
-  var bounds = _getCurrentTextLayerBounds();
-  _positionLayerWithinSelection(selection, bounds);
   state.result = "";
 }
 
@@ -1635,22 +1690,25 @@ function _createTextLayersInStoredSelections() {
 
       // Créer le layer de texte
       var data = { text: text, style: style, direction: state.data.direction, richTextRuns: textRuns, enableSmartFitOnPaste: state.data.enableSmartFitOnPaste };
-      _createAndSetLayerText(data, dimensions.width, dimensions.height);
-
       if (state.data.enableSmartFitOnPaste) {
-        _runSmartFit(dimensions.width, dimensions.height, selection);
+        SmartFitEngine.fitTextInSelection(data, {
+          safeAreaRatio: null,
+          minFontSize: 6,
+          maxFontSize: 300,
+          padding: state.padding || 0,
+          point: state.point
+        });
       } else {
+        _createAndSetLayerText(data, dimensions.width, dimensions.height);
         var bounds = _getCurrentTextLayerBounds();
         if (state.point) {
           _changeToPointText();
         } else {
           _resizeTextBoxToContent(dimensions.width, bounds);
         }
+        var finalBounds = _getCurrentTextLayerBounds();
+        _positionLayerWithinSelection(selection, finalBounds);
       }
-      var bounds = _getCurrentTextLayerBounds();
-
-      // Positionner le layer à l'emplacement de la sélection stockée
-      _positionLayerWithinSelection(selection, bounds);
     } catch (e) {
       state.result = "scriptError: " + (e && e.message ? e.message : e);
       return;

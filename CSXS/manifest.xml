@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<ExtensionManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="6.0" ExtensionBundleId="com.swirt.tools.smartfit" ExtensionBundleVersion="0.1" ExtensionBundleName="TypeR SmartFit">
+<ExtensionManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="6.0" ExtensionBundleId="com.swirt.tools.dynamic" ExtensionBundleVersion="0.1" ExtensionBundleName="TypeR Dynamic">
     <ExtensionList>
-        <Extension Id="typer-smartfit" Version="2.5.0" />
+        <Extension Id="typer-dynamic" Version="2.5.0" />
     </ExtensionList>
     <ExecutionEnvironment>
         <HostList>
@@ -16,7 +16,7 @@
         </RequiredRuntimeList>
     </ExecutionEnvironment>
     <DispatchInfoList>
-        <Extension Id="typer-smartfit">
+        <Extension Id="typer-dynamic">
             <DispatchInfo >
                 <Resources>
                     <MainPath>./app/index.html</MainPath>
@@ -31,7 +31,7 @@
                 </Lifecycle>
                 <UI>
                     <Type>Panel</Type>
-                    <Menu>TypeR SmartFit</Menu>
+                    <Menu>TypeR Dynamic</Menu>
                     <Geometry>
                         <Size>
                             <Height>900</Height>
