@@ -97,7 +97,41 @@ var _hostState = {
     selections: [],
   },
   lastOpenedDocId: null,
+
+  // SmartFit Configuration
+  smartfitConfig: {
+    minFontSize: 4,          // Allow very small text (4pt)
+    maxFontSize: 120,        // Reduced from 300pt (more realistic)
+    defaultPadding: 5,       // Default 5px padding around text
+    minSizeRatio: 0.30,      // Minimum 30% of original size
+    useSubPixelSizes: false, // Future: allow 4.5pt, 5.5pt, etc.
+    trackingStepSize: 10,    // Reduce tracking by 10 unit steps
+    maxTrackingReduction: -100,  // Maximum -100 tracking
+  },
 };
+
+function _getSmartfitConfig() {
+  return _hostState.smartfitConfig || {
+    minFontSize: 4,
+    maxFontSize: 120,
+    defaultPadding: 5,
+    minSizeRatio: 0.30,
+    useSubPixelSizes: false,
+    trackingStepSize: 10,
+    maxTrackingReduction: -100,
+  };
+}
+
+function _setSmartfitConfig(newConfig) {
+  if (!_hostState.smartfitConfig) {
+    _hostState.smartfitConfig = {};
+  }
+  for (var key in newConfig) {
+    if (newConfig.hasOwnProperty(key)) {
+      _hostState.smartfitConfig[key] = newConfig[key];
+    }
+  }
+}
 
 function _clone(obj) {
   if (!obj || typeof obj !== "object") return obj;
@@ -257,131 +291,20 @@ function _convertPointToPixel(value) {
   return (parseFloat(value) / 72) * activeDocument.resolution;
 }
 
-function _runSmartFit(targetWidth, targetHeight, selection) {
-  if (targetWidth <= 0 || targetHeight <= 0) return;
-
-  var isPoint = _textLayerIsPointText();
-  if (isPoint) {
-    _changeToBoxText();
-  }
-
-  // Calculate optimized width and height for elliptical fit (avoid corner clipping)
-  var finalTargetWidth = targetWidth;
-  var effectiveTargetHeight = targetHeight;
-
-  if (selection && typeof selection.width === "number" && selection.width > 0) {
-    var padding = _hostState.createTextLayerInSelection.padding || 0;
-    // Set width to the optimal ellipse inscribed rectangle width (~72% of bubble width)
-    finalTargetWidth = selection.width * 0.72;
-    if (padding > 0) {
-      finalTargetWidth = Math.max(finalTargetWidth - padding * 2, _MIN_TEXTBOX_WIDTH);
-    }
-    
-    var wRatio = finalTargetWidth / selection.width;
-    if (wRatio < 1) {
-      // Height limit for the inscribed rectangle
-      effectiveTargetHeight = selection.height * Math.sqrt(1 - wRatio * wRatio) * 0.95;
-    } else {
-      effectiveTargetHeight = targetHeight * 0.72;
-    }
-  } else {
-    // Fallback if no selection is passed (fitting to existing box)
-    finalTargetWidth = targetWidth * 0.8;
-    effectiveTargetHeight = targetHeight * 0.72;
-  }
-
-  // Set initial text box width to finalTargetWidth. We set the height to a large value initially so text doesn't overflow during measurement.
-  _setTextBoxSize(finalTargetWidth, effectiveTargetHeight * 2);
-
-  var textParams = jamText.getLayerText();
-  if (!textParams || !textParams.layerText || !textParams.layerText.textStyleRange || !textParams.layerText.textStyleRange[0]) {
-    return;
-  }
-
-  var textStyle = textParams.layerText.textStyleRange[0].textStyle;
-  var originalSize = textStyle.size || 14;
-  var originalLeading = textStyle.leading;
-  var hasLeading = !textStyle.autoLeading && (originalLeading !== undefined);
-
-  var currentSize = originalSize;
-  var currentTracking = textStyle.tracking || 0;
-
-  var maxIterations = 20;
-  var minSize = Math.max(6, originalSize * 0.4); // Don't go below 6pt or 40% of original size
-
-  for (var iter = 0; iter < maxIterations; iter++) {
-    // Measure current bounds of the rendered text pixels
-    var bounds = _getCurrentTextLayerBounds();
-    var textHeight = bounds.height;
-    var textWidth = bounds.width;
-
-    // Check if it fits within the elliptical bounds
-    if (textHeight <= effectiveTargetHeight && textWidth <= finalTargetWidth) {
-      break; // Fits!
-    }
-
-    // Try reducing size
-    if (currentSize > minSize) {
-      currentSize -= 1.0; // Reduce by 1 unit
-      if (currentSize < minSize) currentSize = minSize;
-    } else {
-      // If we are already at minimum size and still don't fit, try tightening tracking
-      if (currentTracking > -50) {
-        currentTracking -= 10;
-      } else {
-        break; // Can't reduce further
-      }
-    }
-
-    // Apply new size, leading, tracking
-    var newStyle = {
-      size: currentSize,
-      tracking: currentTracking
-    };
-    if (hasLeading) {
-      newStyle.autoLeading = false;
-      newStyle.leading = currentSize * (originalLeading / originalSize);
-    } else {
-      newStyle.autoLeading = true;
-    }
-
-    // Update layer text style
-    var updatedParams = jamText.getLayerText();
-    if (updatedParams && updatedParams.layerText && updatedParams.layerText.textStyleRange) {
-      for (var i = 0; i < updatedParams.layerText.textStyleRange.length; i++) {
-        var styleObj = updatedParams.layerText.textStyleRange[i].textStyle;
-        styleObj.size = newStyle.size;
-        styleObj.tracking = newStyle.tracking;
-        if (newStyle.autoLeading) {
-          styleObj.autoLeading = true;
-          if (styleObj.hasOwnProperty("leading")) delete styleObj.leading;
-        } else {
-          styleObj.autoLeading = false;
-          styleObj.leading = newStyle.leading;
-        }
-      }
-      jamText.setLayerText(updatedParams);
-    }
-  }
-
-  // After fitting, adjust the final text box height to fit the content exactly
-  var finalBounds = _getCurrentTextLayerBounds();
-  _setTextBoxSize(finalTargetWidth, finalBounds.height + currentSize + 2);
-}
-
 function _runSmartFitOnActiveLayer(data) {
   // Try to get active selection bounds first
   var selection = _getCurrentSelectionBounds();
   var targetWidth = 0;
   var targetHeight = 0;
   var padding = data.padding || _hostState.createTextLayerInSelection.padding || 0;
+  var config = _getSmartfitConfig();
 
   if (selection !== undefined) {
     SmartFitEngine.fitTextInSelection(data, {
       safeAreaRatio: null,
-      minFontSize: 6,
-      maxFontSize: 300,
-      padding: padding,
+      minFontSize: config.minFontSize,
+      maxFontSize: config.maxFontSize,
+      padding: padding || config.defaultPadding,
       point: _textLayerIsPointText()
     });
   } else {
@@ -396,10 +319,6 @@ function _runSmartFitOnActiveLayer(data) {
         }
       }
     } catch (e) {}
-    
-    if (targetWidth > 0 && targetHeight > 0) {
-      _runSmartFit(targetWidth, targetHeight, selection);
-    }
   }
 }
 
@@ -1194,6 +1113,7 @@ function _setActiveLayerText() {
       _setLayerStroke(dataStyle.stroke);
     }
     if (payload.enableSmartFitOnPaste) {
+      SmartFitEngine.forceLayoutUpdate();
       _runSmartFitOnActiveLayer(payload);
     } else {
       var newBounds = _getCurrentTextLayerBounds();
@@ -1252,11 +1172,12 @@ function _createTextLayerInSelection() {
     return;
   }
   if (state.data.enableSmartFitOnPaste) {
+    var config = _getSmartfitConfig();
     var error = SmartFitEngine.fitTextInSelection(state.data, {
       safeAreaRatio: null,
-      minFontSize: 6,
-      maxFontSize: 300,
-      padding: state.padding || 0,
+      minFontSize: config.minFontSize,
+      maxFontSize: config.maxFontSize,
+      padding: state.padding || config.defaultPadding,
       point: state.point
     });
     if (error) {
@@ -1691,11 +1612,12 @@ function _createTextLayersInStoredSelections() {
       // Créer le layer de texte
       var data = { text: text, style: style, direction: state.data.direction, richTextRuns: textRuns, enableSmartFitOnPaste: state.data.enableSmartFitOnPaste };
       if (state.data.enableSmartFitOnPaste) {
+        var config = _getSmartfitConfig();
         SmartFitEngine.fitTextInSelection(data, {
           safeAreaRatio: null,
-          minFontSize: 6,
-          maxFontSize: 300,
-          padding: state.padding || 0,
+          minFontSize: config.minFontSize,
+          maxFontSize: config.maxFontSize,
+          padding: state.padding || config.defaultPadding,
           point: state.point
         });
       } else {

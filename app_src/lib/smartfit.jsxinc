@@ -48,40 +48,31 @@ var SmartFitEngine = (function () {
     return heightOverflow || widthOverflow;
   }
 
-  // Smart Fit v3: Safe Area Calculation based on Bubble Geometry and Padding
+  // Improved Smart Fit v3.1: Simplified Safe Area Calculation
+  // For rounded rectangle bubbles (most common in manga)
+  // Remove complex ellipse math - use consistent ratio instead
   function calculateSafeArea(width, height, customRatio, padding) {
     var ratio;
-    var R = width / (height || 1);
-
+    
+    // Allow custom ratio, otherwise use sensible default for rounded rectangles
     if (typeof customRatio === "number" && customRatio > 0 && customRatio <= 1) {
       ratio = customRatio;
     } else {
-      if (R < 0.6) {
-        ratio = 0.65;
-      } else if (R < 0.9) {
-        ratio = 0.70;
-      } else if (R <= 1.2) {
-        ratio = 0.75;
-      } else {
-        ratio = 0.80;
-      }
+      // Simplified: 80% works well for most speech bubbles
+      // (removes aspect-ratio dependent logic that was designed for ellipses)
+      ratio = 0.80;
     }
 
     var targetWidth = width * ratio;
-    var targetHeight;
+    var targetHeight = height * ratio;
 
-    // Auto-detect vertical bubble/box (R < 0.9) to allow more vertical space (85%)
-    if (R < 0.9) {
-      targetHeight = height * 0.85;
-    } else {
-      targetHeight = Math.min(height * Math.sqrt(1 - ratio * ratio) * 0.95, height * ratio);
-    }
-
+    // Apply padding if specified
     if (padding > 0) {
       targetWidth = Math.max(targetWidth - padding * 2, 50);
       targetHeight = Math.max(targetHeight - padding * 2, 30);
     }
 
+    // Ensure minimum dimensions
     if (targetWidth <= 0) targetWidth = width;
     if (targetHeight <= 0) targetHeight = height;
 
@@ -96,6 +87,7 @@ var SmartFitEngine = (function () {
     options = options || {};
     var safeAreaRatio = options.safeAreaRatio;
     var minFontSize = Math.floor((typeof options.minFontSize === "number") ? options.minFontSize : 6);
+    var maxFontSize = Math.floor((typeof options.maxFontSize === "number") ? options.maxFontSize : 120);
 
     // Step 1: Ensure Style & Get Original Font Size (Integer)
     var style = _ensureStyle(data.style);
@@ -107,7 +99,7 @@ var SmartFitEngine = (function () {
         style.textProps.layerText.textStyleRange[0].textStyle.size) {
       styleFontSize = style.textProps.layerText.textStyleRange[0].textStyle.size;
     }
-    styleFontSize = Math.floor(styleFontSize);
+    styleFontSize = Math.floor(Math.min(styleFontSize, maxFontSize));
 
     // Step 2: Selection Bounds & Safe Text Area
     var selection = _checkSelection({
@@ -131,20 +123,23 @@ var SmartFitEngine = (function () {
     var isOverflow = checkOverflow(initialBounds, containerWidth, containerHeight);
     var bestFittingSize = styleFontSize;
 
-    // Step 4: Integer-Only Binary Search for Maximum Fitting Font Size
+    // Step 4: Integer-Only Binary Search for Maximum Fitting Font Size (Optimized)
     if (isOverflow) {
       var low = minFontSize;
       var high = styleFontSize;
       bestFittingSize = minFontSize;
+      var lastMeasuredSize = -1;
 
       while (low <= high) {
         var mid = Math.floor((low + high) / 2);
         if (mid < minFontSize) break;
+        if (mid === lastMeasuredSize) break;  // Avoid remeasuring same size
 
         setLayerFontSize(mid);
         forceLayoutUpdate();
         var currentBounds = getRenderedTextBounds();
         var currentOverflow = checkOverflow(currentBounds, containerWidth, containerHeight);
+        lastMeasuredSize = mid;
 
         if (!currentOverflow) {
           bestFittingSize = mid;
@@ -169,17 +164,31 @@ var SmartFitEngine = (function () {
     var finalLayerBounds = getRenderedTextBounds();
     _positionLayerWithinSelection(selection, finalLayerBounds);
 
-    // Step 7: Auto Tracking Fallback (-25, then -50) if still overflows at min size
+    // Step 7: Improved Tracking Fallback with Binary Search (if still overflows)
     if (checkOverflow(finalLayerBounds, containerWidth, containerHeight)) {
-      var fallbackTrackings = [-25, -50];
-      for (var t = 0; t < fallbackTrackings.length; t++) {
-        setLayerTracking(fallbackTrackings[t]);
+      var minTracking = -100;
+      var maxTracking = 0;
+      var bestTracking = 0;
+      var trackingIter = 0;
+      var maxTrackingIters = 5;
+
+      while ((maxTracking - minTracking) > 5 && trackingIter < maxTrackingIters) {
+        var midTracking = Math.floor((minTracking + maxTracking) / 2);
+        setLayerTracking(midTracking);
         forceLayoutUpdate();
-        var fbBounds = getRenderedTextBounds();
-        if (!checkOverflow(fbBounds, containerWidth, containerHeight)) {
-          break;
+
+        var trackingBounds = getRenderedTextBounds();
+        if (checkOverflow(trackingBounds, containerWidth, containerHeight)) {
+          maxTracking = midTracking - 5;  // Tighter tracking needed
+        } else {
+          bestTracking = midTracking;
+          minTracking = midTracking;
         }
+        trackingIter++;
       }
+
+      setLayerTracking(bestTracking);
+      forceLayoutUpdate();
     }
 
     // Step 8: Re-apply final integer font size and force single draw
