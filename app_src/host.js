@@ -101,7 +101,7 @@ var _hostState = {
   // SmartFit Configuration
   smartfitConfig: {
     minFontSize: 4,          // Allow very small text (4pt)
-    maxFontSize: 120,        // Reduced from 300pt (more realistic)
+    maxFontSize: 180,        // Adjusted to 180pt max
     defaultPadding: 5,       // Default 5px padding around text
     minSizeRatio: 0.30,      // Minimum 30% of original size
     useSubPixelSizes: false, // Future: allow 4.5pt, 5.5pt, etc.
@@ -113,7 +113,7 @@ var _hostState = {
 function _getSmartfitConfig() {
   return _hostState.smartfitConfig || {
     minFontSize: 4,
-    maxFontSize: 120,
+    maxFontSize: 180,
     defaultPadding: 5,
     minSizeRatio: 0.30,
     useSubPixelSizes: false,

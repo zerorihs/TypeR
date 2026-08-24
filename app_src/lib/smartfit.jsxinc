@@ -87,7 +87,7 @@ var SmartFitEngine = (function () {
     options = options || {};
     var safeAreaRatio = options.safeAreaRatio;
     var minFontSize = Math.floor((typeof options.minFontSize === "number") ? options.minFontSize : 6);
-    var maxFontSize = Math.floor((typeof options.maxFontSize === "number") ? options.maxFontSize : 120);
+    var maxFontSize = Math.floor((typeof options.maxFontSize === "number") ? options.maxFontSize : 180);
 
     // Step 1: Ensure Style & Get Original Font Size (Integer)
     var style = _ensureStyle(data.style);
